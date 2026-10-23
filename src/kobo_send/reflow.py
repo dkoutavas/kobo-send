@@ -41,6 +41,7 @@ STEP_TOLERANCE = 0.08  # how far a step can be from a whole multiple, as a share
 SKIP_BLOCKS = {"PageHeader", "PageFooter"}
 REF = re.compile(r"<content-ref src=['\"]([^'\"]+)['\"]></content-ref>")
 HEADING = re.compile(r"^\s*<h([1-6])\b")
+CAPTION = re.compile(r"(Listing|Figure|Table)\s+[A-Z\d]+\.\d+")
 TAGS = re.compile(r"<[^>]+>")
 CHAPTER_LEVEL = 1  # without PDF bookmarks, a heading at this level or higher starts a new chapter
 MAX_CHAPTERS = 100  # with PDF bookmarks, split at the deepest level that gives at most this many chapters
@@ -166,11 +167,13 @@ def render_run(run: dict) -> str:
     # Most neighbouring glyphs are one column apart. Steps over a space are multiples of that.
     width = min(statistics.median(steps), statistics.mode(round(s, 1) for s in steps)) if steps else 1.0
     left = min(c["bbox"][0] for line in run["lines"] for c in line["chars"])
+    # Glyph boxes of some fonts (Type 3) are much smaller than the line pitch. Compare with the pitch.
+    tops = [line["bbox"][1] for line in run["lines"]]
+    pitches = [b - a for a, b in zip(tops, tops[1:]) if b > a]
+    pitch = statistics.median(pitches) if pitches else 0.0
     out: list[str] = []
-    prev_bottom = None
-    for line in run["lines"]:
-        top, bottom = line["bbox"][1], line["bbox"][3]
-        if prev_bottom is not None and top - prev_bottom > 0.8 * (bottom - top):
+    for i, line in enumerate(run["lines"]):
+        if i and pitch and tops[i] - tops[i - 1] > 1.6 * pitch:
             out.append("")  # a blank line in the listing
         row: list[str] = []
         for c in line["chars"]:
@@ -178,7 +181,6 @@ def render_run(run: dict) -> str:
             row.extend(" " * (col - len(row)))
             row.append(c["char"])
         out.append("".join(row))
-        prev_bottom = bottom
     return "<pre><code>" + html.escape("\n".join(out)) + "</code></pre>"
 
 
@@ -259,16 +261,23 @@ def page_parts(mpage: dict, lines: list[dict], images: Images) -> list[Part]:
             m = HEADING.match(body) if block["block_type"] == "SectionHeader" else None
             parts.append(Part(body, int(m.group(1)), text_of(body)) if m else Part(body))
             continue
-        for i in dict.fromkeys(run_of[id(l)] for l in mono):
+        here = list(dict.fromkeys(run_of[id(l)] for l in mono))
+        # Prose that marker merged into the listing block: a caption above it, margin notes beside it.
+        top = min(runs[i]["bbox"][1] for i in here)
+        above = [l["text"] for l in inside if not l["mono"] and l["bbox"][3] <= top + 1]
+        beside = [l["text"] for l in inside if not l["mono"] and l["bbox"][3] > top + 1]
+        if above:
+            text = " ".join(above)
+            css = ' class="caption"' if CAPTION.match(text) else ""
+            parts.append(Part(f"<p{css}>{html.escape(text)}</p>"))
+        for i in here:
             if i in emitted:
                 continue
             emitted.add(i)
             parts += [Part(resolve(c, by_id, images)) for c in captions_of.get(i, [])]
             parts.append(Part(render_run(runs[i])))
-        # Prose that marker merged into the listing block, such as a margin note.
-        notes = [l["text"] for l in inside if not l["mono"]]
-        if notes:
-            parts.append(Part(f'<p class="note">{html.escape(" ".join(notes))}</p>'))
+        if beside:
+            parts.append(Part(f'<p class="note">{html.escape(" ".join(beside))}</p>'))
     return parts
 
 

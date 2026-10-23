@@ -26,6 +26,7 @@ CSS = """\
 body { margin: 0 2%; }
 pre { white-space: pre-wrap; font-family: monospace; font-size: 0.75em; line-height: 1.25; margin: 0.8em 0; }
 p.note { font-size: 0.85em; font-style: italic; margin-left: 1em; padding-left: 0.5em; border-left: 2px solid #888; }
+p.caption { font-size: 0.9em; font-weight: bold; margin-bottom: 0.2em; }
 img { max-width: 100%; }
 table { border-collapse: collapse; font-size: 0.85em; }
 th, td { border: 1px solid #888; padding: 0.2em 0.4em; }

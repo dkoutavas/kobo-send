@@ -63,6 +63,15 @@ class CodeTest(unittest.TestCase):
         out = reflow.render_run(reflow.code_runs(lines)[0])
         self.assertIn("NAME     AGE\nkubia    1m", out)
 
+    def test_blank_lines_come_from_the_line_pitch(self):
+        # Small glyph boxes (height 3) at a 9 pt pitch: no blank lines. One 18 pt step: one blank line.
+        lines = reflow.page_lines(pdftext_page(
+            line("a: 1x", 100, 100, MONO, 3.0), line("b: 2x", 100, 109, MONO, 3.0),
+            line("c: 3x", 100, 118, MONO, 3.0), line("d: 4x", 100, 136, MONO, 3.0),
+        ))
+        out = reflow.render_run({"lines": lines, "bbox": [100, 100, 130, 139]})
+        self.assertEqual(out, "<pre><code>a: 1x\nb: 2x\nc: 3x\n\nd: 4x</code></pre>")
+
     def test_a_large_gap_starts_a_new_listing(self):
         lines = reflow.page_lines(pdftext_page(line("a = 1", 100, 100), line("b = 2", 100, 200)))
         self.assertEqual(len(reflow.code_runs(lines)), 2)
@@ -127,6 +136,19 @@ class PageTest(unittest.TestCase):
         self.assertEqual(html[4], "<p>Next paragraph.</p>")
         self.assertEqual((parts[5].level, parts[5].title), (2, "5.4 Ingress"))
         self.assertNotIn("Chapter 5", "".join(html))
+
+    def test_caption_merged_above_the_listing_stays_above_it(self):
+        lines = reflow.page_lines(pdftext_page(
+            prose_line("Listing 2.9 A container image can have multiple tags", 100, 88),
+            *yaml_lines(),
+        ))
+        page = {"id": "/page/7/Page/0", "block_type": "Page", "children": [
+            block("/page/7/Text/0", "Text", [99, 87, 400, 145], "<p>Listing 2.9 ... apiVersion: v1</p>"),
+        ]}
+        html = [p.html for p in reflow.page_parts(page, lines, reflow.Images())]
+        self.assertEqual(html[0], '<p class="caption">Listing 2.9 A container image can have multiple tags</p>')
+        self.assertTrue(html[1].startswith("<pre><code>apiVersion: v1"))
+        self.assertEqual(len(html), 2)
 
     def test_image_block_becomes_an_img(self):
         jpeg = base64.b64encode(b"\xff\xd8data").decode()
