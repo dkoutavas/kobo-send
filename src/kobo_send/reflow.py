@@ -335,14 +335,17 @@ def pdf_info(pdf: Path) -> Info:
     import pypdfium2
 
     doc = pypdfium2.PdfDocument(str(pdf))
-    meta = doc.get_metadata_dict()
-    outline = []
-    for mark in doc.get_toc():
-        dest = mark.get_dest()
-        page = dest.get_index() if dest else None
-        if page is not None:
-            outline.append((mark.level, " ".join(mark.get_title().split()), page))
-    image = doc[0].render(scale=1.5).to_pil().convert("RGB")
+    try:
+        meta = doc.get_metadata_dict()
+        outline = []
+        for mark in doc.get_toc():
+            dest = mark.get_dest()
+            page = dest.get_index() if dest else None
+            if page is not None:
+                outline.append((mark.level, " ".join(mark.get_title().split()), page))
+        image = doc[0].render(scale=1.5).to_pil().convert("RGB")
+    finally:
+        doc.close()
     buf = io.BytesIO()
     image.save(buf, "JPEG", quality=85)
     return Info((meta.get("Title") or "").strip(), (meta.get("Author") or "").strip(), buf.getvalue(), outline)
