@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+
+# Claude Code config (stored in private context repo)
+CLAUDE.md
+.claude/settings.json
+.claude/commands/
