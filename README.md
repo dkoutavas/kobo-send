@@ -38,16 +38,16 @@ install -m755 k2pdfopt ~/.local/bin/k2pdfopt
 
 ## Configure
 
-All settings are optional. The defaults are:
+There is no settings file. The defaults are constants at the top of two files. Edit them to change a default:
 
-```toml
-# ~/.config/kobo-send/config.toml
-inbox = "gdrive:Books"      # rclone remote folder to send from
-sent = "Sent"               # subfolder of the inbox that receives sent files
-subdir = "Technical"        # folder under Books/ on the Kobo
-label = "KOBOeReader"       # filesystem label of the Kobo
-k2pdfopt_device = "koc"     # Kobo Clara HD profile: same 1072 px, 300 dpi panel as the Clara BW
-```
+| Constant | File | Default |
+|---|---|---|
+| `INBOX`, `SENT` | `src/kobo_send/cli.py` | `gdrive:Books`, `Sent` |
+| `SUBDIR` (or `-d`) | `src/kobo_send/cli.py` | `Technical` |
+| `LABEL` | `src/kobo_send/cli.py` | `KOBOeReader` |
+| `PDF_MODE` (or `--pdf`) | `src/kobo_send/cli.py` | `fit` |
+| `K2PDFOPT_DEVICE` | `src/kobo_send/books.py` | `koc` (Kobo Clara HD profile: same 1072 px, 300 dpi panel as the Clara BW) |
+| `MARKER_PYTHON` | `src/kobo_send/books.py` | `~/.local/share/kobo-send/marker/bin/python` |
 
 For another Kobo model, run `k2pdfopt -ui- -dev ?` to list the device profiles.
 
@@ -67,7 +67,7 @@ If a book fails, the tool continues with the next book. At the end, it keeps the
 
 ## PDF handling
 
-A PDF has fixed page positions, not a text flow. kobo-send has two PDF modes. Select one with `--pdf` or with `pdf_mode` in the settings.
+A PDF has fixed page positions, not a text flow. kobo-send has two PDF modes. Select one with `--pdf`. `PDF_MODE` in `src/kobo_send/cli.py` sets the default.
 
 | Mode | Output on the Kobo | Font size can change | Needs |
 |---|---|---|---|
@@ -110,6 +110,8 @@ Other approaches that were tested and rejected:
 - Calibre (`ebook-convert`) PDF to EPUB splits watermarks into one paragraph per word and mixes margin notes into code.
 - k2pdfopt with reflow (`-wrap`) also mixes margin notes into code and breaks tables.
 - marker balanced mode (a vision language model through llama.cpp) is about 7 times slower and also loses the code indentation.
+- marker fast mode without the code rebuild puts each code listing on one line.
+- k2pdfopt fit mode for whole books keeps the layout, but a long book makes the Kobo unresponsive. A 41.8 MB fitted PDF (739 source pages) did.
 
 ## Tests
 

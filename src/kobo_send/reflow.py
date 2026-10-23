@@ -27,13 +27,12 @@ import statistics
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import epub
 
 FIXED_PITCH = 1  # PDF font descriptor flag, bit 1
-MONO_NAME = re.compile(r"courier|mono|consol|menlo|inconsolata|lettergothic|typewriter", re.I)
 # Type 3 fonts have no name and no flags in pdfium, so a line is also judged by its glyph positions.
 MIN_STEPS = 5  # glyph steps that a line needs to be judged by its geometry alone
 STEP_FIT = 0.9  # share of the steps that must be whole multiples of the glyph width
@@ -61,24 +60,20 @@ class Part:
     title: str = ""
 
 
-@dataclass
-class Images:
-    files: dict[str, bytes] = field(default_factory=dict)
-
-    def add(self, b64: str) -> str:
-        data = base64.b64decode(b64)
-        ext = "png" if data.startswith(b"\x89PNG") else "jpg"
-        name = f"img{len(self.files) + 1:04d}.{ext}"
-        self.files[name] = data
-        return name
+def add_image(files: dict[str, bytes], b64: str) -> str:
+    """Store a base64 image under the next free name and return the name."""
+    data = base64.b64decode(b64)
+    ext = "png" if data.startswith(b"\x89PNG") else "jpg"
+    name = f"img{len(files) + 1:04d}.{ext}"
+    files[name] = data
+    return name
 
 
 # ---- Code listings -----------------------------------------------------------
 
 
 def is_mono(span: dict) -> bool:
-    font = span["font"]
-    return bool((font.get("flags") or 0) & FIXED_PITCH) or bool(MONO_NAME.search(font.get("name") or ""))
+    return bool((span["font"].get("flags") or 0) & FIXED_PITCH)
 
 
 def glyph_steps(chars: list[dict]) -> list[float]:
@@ -158,14 +153,12 @@ def code_runs(lines: list[dict]) -> list[dict]:
 
 def render_run(run: dict) -> str:
     """Place every glyph at its column, so the indentation and the alignment come back."""
-    steps = [
-        b["bbox"][0] - a["bbox"][0]
-        for line in run["lines"]
-        for a, b in zip(line["chars"], line["chars"][1:])
-        if b["bbox"][0] > a["bbox"][0]
-    ]
-    # Most neighbouring glyphs are one column apart. Steps over a space are multiples of that.
-    width = min(statistics.median(steps), statistics.mode(round(s, 1) for s in steps)) if steps else 1.0
+    widths = [line["width"] for line in run["lines"] if line["width"]]
+    if widths:
+        width = statistics.median(widths)
+    else:  # only short lines, flagged by the font: measure their glyph steps
+        steps = [s for line in run["lines"] for s in glyph_steps(line["chars"])]
+        width = statistics.median(steps) if steps else 1.0
     left = min(c["bbox"][0] for line in run["lines"] for c in line["chars"])
     # Glyph boxes of some fonts (Type 3) are much smaller than the line pitch. Compare with the pitch.
     tops = [line["bbox"][1] for line in run["lines"]]
@@ -221,18 +214,18 @@ def index(block: dict, by_id: dict[str, dict]) -> None:
         index(child, by_id)
 
 
-def resolve(block: dict, by_id: dict[str, dict], images: Images) -> str:
+def resolve(block: dict, by_id: dict[str, dict], images: dict[str, bytes]) -> str:
     """Return the HTML of a block, with its child blocks and its image filled in."""
     own = (block.get("images") or {}).get(block["id"])
     if own:
-        return f'<img src="../images/{images.add(own)}" alt=""/>'
+        return f'<img src="../images/{add_image(images, own)}" alt=""/>'
     return REF.sub(
         lambda m: resolve(by_id[m.group(1)], by_id, images) if m.group(1) in by_id else "",
         block.get("html") or "",
     )
 
 
-def page_parts(mpage: dict, lines: list[dict], images: Images) -> list[Part]:
+def page_parts(mpage: dict, lines: list[dict], images: dict[str, bytes]) -> list[Part]:
     """Turn one marker page into parts, with the code listings rebuilt from the glyphs."""
     by_id: dict[str, dict] = {}
     index(mpage, by_id)
@@ -452,12 +445,12 @@ def convert(pdf: Path, out: Path) -> None:
     lines = pdf_lines(pdf, numbers)
     if sum(len(l["text"]) for page in lines.values() for l in page) < MIN_CHARS_PER_PAGE * max(len(numbers), 1):
         raise ReflowError("the PDF has almost no text layer, probably a scan. Use the fit mode for it.")
-    images = Images()
+    images: dict[str, bytes] = {}
     pages = [(n, page_parts(mpage, lines[n], images)) for mpage, n in zip(mpages, numbers)]
     info = pdf_info(pdf)
     title = info.title or pdf.stem
     book, toc = build(pages, info.outline, title)
-    epub.write(out, title=title, author=info.author, chapters=book, images=images.files, cover=info.cover, toc=toc)
+    epub.write(out, title=title, author=info.author, chapters=book, images=images, cover=info.cover, toc=toc)
 
 
 def main(argv: list[str] | None = None) -> int:

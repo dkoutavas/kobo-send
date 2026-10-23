@@ -127,7 +127,7 @@ class PageTest(unittest.TestCase):
         }
 
     def test_order_code_caption_and_note(self):
-        parts = reflow.page_parts(self.page, self.lines, reflow.Images())
+        parts = reflow.page_parts(self.page, self.lines, {})
         html = [p.html for p in parts]
         self.assertEqual(html[0], "<p>To create the service, apply this manifest.</p>")
         self.assertEqual(html[1], "<p>Listing 5.12 A service</p>")
@@ -145,7 +145,7 @@ class PageTest(unittest.TestCase):
         page = {"id": "/page/7/Page/0", "block_type": "Page", "children": [
             block("/page/7/Text/0", "Text", [99, 87, 400, 145], "<p>Listing 2.9 ... apiVersion: v1</p>"),
         ]}
-        html = [p.html for p in reflow.page_parts(page, lines, reflow.Images())]
+        html = [p.html for p in reflow.page_parts(page, lines, {})]
         self.assertEqual(html[0], '<p class="caption">Listing 2.9 A container image can have multiple tags</p>')
         self.assertTrue(html[1].startswith("<pre><code>apiVersion: v1"))
         self.assertEqual(len(html), 2)
@@ -155,10 +155,10 @@ class PageTest(unittest.TestCase):
         pic = block("/page/7/Diagram/9", "Diagram", [100, 300, 400, 400])
         pic["images"] = {pic["id"]: jpeg}
         page = {"id": "/page/7/Page/0", "block_type": "Page", "children": [pic]}
-        images = reflow.Images()
+        images = {}
         parts = reflow.page_parts(page, [], images)
         self.assertEqual(parts[0].html, '<img src="../images/img0001.jpg" alt=""/>')
-        self.assertEqual(images.files, {"img0001.jpg": b"\xff\xd8data"})
+        self.assertEqual(images, {"img0001.jpg": b"\xff\xd8data"})
 
     def test_paragraph_with_one_code_line_stays_prose(self):
         lines = reflow.page_lines(pdftext_page(
@@ -169,7 +169,7 @@ class PageTest(unittest.TestCase):
         page = {"id": "/page/1/Page/0", "block_type": "Page", "children": [
             block("/page/1/Text/0", "Text", [99, 99, 400, 126], "<p>Run the command ... kubectl get pods</p>"),
         ]}
-        parts = reflow.page_parts(page, lines, reflow.Images())
+        parts = reflow.page_parts(page, lines, {})
         self.assertEqual([p.html for p in parts], ["<p>Run the command ... kubectl get pods</p>"])
 
 

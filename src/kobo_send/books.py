@@ -11,7 +11,9 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Config
+PDF_MODES = ("fit", "reflow")
+K2PDFOPT_DEVICE = "koc"  # Kobo Clara HD profile: same 1072 px, 300 dpi panel as the Clara BW
+MARKER_PYTHON = Path.home() / ".local/share/kobo-send/marker/bin/python"  # Python of the marker environment
 
 # The directory that holds the kobo_send package. The reflow subprocess imports it from here.
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -67,28 +69,28 @@ def clean_name(stem: str) -> str:
     return _ISBN_TAIL.sub("", _SITE_PREFIX.sub("", stem))
 
 
-def convert(src: Path, out: Path, cfg: Config) -> None:
+def convert(src: Path, out: Path, pdf_mode: str) -> None:
     """Write src to out in the format the Kobo gets. Raise ConversionError on failure."""
     lower = src.name.lower()
     if lower.endswith(".kepub.epub"):
         shutil.copyfile(src, out)
         return
-    if lower.endswith(".pdf") and cfg.pdf_mode == "reflow":
-        _reflow(src, out, Path(cfg.marker_python).expanduser())
+    if lower.endswith(".pdf") and pdf_mode == "reflow":
+        _reflow(src, out)
         return
     if lower.endswith(".pdf"):
-        _run(["k2pdfopt", *K2PDFOPT_ARGS, "-dev", cfg.k2pdfopt_device, "-o", str(out), str(src)], out)
+        _run(["k2pdfopt", *K2PDFOPT_ARGS, "-dev", K2PDFOPT_DEVICE, "-o", str(out), str(src)], out)
     else:
         _run(_kepubify(src, out), out)
 
 
-def _reflow(src: Path, out: Path, python: Path) -> None:
+def _reflow(src: Path, out: Path) -> None:
     """PDF to EPUB with marker in its own environment, then EPUB to KEPUB with kepubify."""
-    if not python.is_file():
-        raise ConversionError(f"marker environment not found: {python}. See the README, section Reflow mode.")
+    if not MARKER_PYTHON.is_file():
+        raise ConversionError(f"marker environment not found: {MARKER_PYTHON}. See the README, section Reflow mode.")
     epub = out.with_name(out.name.removesuffix(".kepub.epub") + ".epub")
     try:
-        cmd = [str(python), "-m", "kobo_send.reflow", str(src), str(epub)]
+        cmd = [str(MARKER_PYTHON), "-m", "kobo_send.reflow", str(src), str(epub)]
         _run(cmd, epub, label="reflow", env={"PYTHONPATH": str(SRC_DIR)})
         _run(_kepubify(epub, out), out)
     finally:
