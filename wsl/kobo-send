@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# kobo-send: send EPUBs (as KEPUB) and PDFs (fitted to the screen) to a Kobo attached to Windows (WSL2).
+# Usage: kobo-send [-d SUBDIR] [-k] [FILE ...]
+#   no FILE    send every *.epub and *.pdf in G:\My Drive\Books, then move each sent file to Books\Sent
+#   -d SUBDIR  folder under Books/ on the Kobo (default: Technical)
+#   -k         keep the Kobo mounted afterwards (default: unmount and eject)
+# FILE can be a quoted Windows path ('C:\Users\...\book.epub') or a WSL path.
+# EPUB goes through kepubify. PDF goes through k2pdfopt (fit-width, no reflow, so code keeps its layout).
+# Each sent book replaces the other format of the same name on the Kobo (X.pdf replaces X.kepub.epub).
+set -euo pipefail
+
+usage() { sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 2; }
+die() { echo "kobo-send: $*" >&2; exit 1; }
+
+# mount_drive LETTER: mount a Windows drive under /mnt if needed, print the mount point.
+mount_drive() {
+  local m=/mnt/${1,,}
+  if ! mountpoint -q "$m"; then
+    echo "mounting $1: at $m (sudo)" >&2
+    # Runs inside $(...), where set -e does not apply: fail explicitly.
+    sudo mkdir -p "$m" && sudo mount -t drvfs "$1:" "$m" -o "uid=$(id -u),gid=$(id -g)" || return
+  fi
+  echo "$m"
+}
+
+# convert SRC OUT: write SRC to OUT in the format the Kobo gets.
+convert() {
+  case $1 in
+    *.kepub.epub) cp "$1" "$2" ;;
+    *.pdf)
+      command -v k2pdfopt >/dev/null || { echo "k2pdfopt not on PATH" >&2; return 1; }
+      # -dev koc: Clara HD profile, same 1072px 300dpi panel as the Clara BW.
+      # -wrap- -col 1: fit width, no reflow. -n: keep vector text. -ocr-: source already has text.
+      k2pdfopt -ui- -a- -x -y -dev koc -ocr- -wrap- -col 1 -n -o "$2" "$1" </dev/null >"$2.log" 2>&1 &&
+        [[ -s $2 ]] || { tail -20 "$2.log" >&2; return 1; }
+      ;;
+    # Give -o a file path: with one input and a missing -o path, kepubify writes a file, not a dir.
+    *) kepubify -o "$2" "$1" >/dev/null ;;
+  esac
+}
+
+# valid FILE: the file opens as its format (zip test for KEPUB, header check for PDF).
+valid() {
+  case $1 in
+    *.pdf) [[ $(head -c5 "$1") == %PDF- ]] ;;
+    *) unzip -tqq "$1" ;;
+  esac
+}
+
+subdir=Technical
+eject=1
+while getopts 'd:kh' opt; do
+  case $opt in
+    d) subdir=$OPTARG ;;
+    k) eject=0 ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+command -v kepubify >/dev/null || die "kepubify not on PATH"
+
+inbox=
+if (($# == 0)); then
+  inbox="$(mount_drive G)/My Drive/Books" || die "cannot mount G:. sudo needs a terminal, so run kobo-send in your shell, not with !"
+  [[ -d $inbox ]] || die "inbox $inbox not found"
+  shopt -s nullglob
+  set -- "$inbox"/*.epub "$inbox"/*.pdf
+  shopt -u nullglob
+  (($#)) || { echo "inbox empty: G:\\My Drive\\Books"; exit 0; }
+fi
+
+letter=$(powershell.exe -NoProfile -Command \
+  "(Get-Volume | Where-Object FileSystemLabel -eq 'KOBOeReader').DriveLetter" | tr -d '\r\n')
+[[ $letter =~ ^[A-Z]$ ]] || die "no drive labelled KOBOeReader. Is the Kobo plugged in and set to USB mode?"
+mnt=$(mount_drive "$letter") || die "cannot mount $letter:. sudo needs a terminal, so run kobo-send in your shell, not with !"
+[[ -d $mnt/.kobo ]] || die "$mnt has no .kobo directory, so it is not a Kobo root"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/in" "$work/out"
+dest=$mnt/Books/$subdir
+mkdir -p "$dest"
+
+fail=0
+for arg in "$@"; do
+  src=$arg
+  [[ $src == [A-Za-z]:\\* ]] && src=$(wslpath -u "$src")
+  [[ -f $src ]] || { echo "SKIP $arg: not found" >&2; fail=1; continue; }
+
+  base=$(basename "$src")
+  case $base in
+    *.kepub.epub) name=${base%.kepub.epub} ext=kepub.epub other=pdf ;;
+    *.epub) name=${base%.epub} ext=kepub.epub other=pdf ;;
+    *.pdf) name=${base%.pdf} ext=pdf other=kepub.epub ;;
+    *) echo "SKIP $arg: not an EPUB or PDF" >&2; fail=1; continue ;;
+  esac
+  # Drop the download-site prefix and the trailing ISBN run from the file name.
+  name=$(sed -E 's/^example\.pub_//; s/(-[0-9]{13}|-[0-9]{9}[0-9X])+$//' <<<"$name")
+  out=$work/out/$name.$ext
+  target=$dest/$name.$ext
+
+  echo "...  $base"
+  # Convert from local disk: k2pdfopt reads the Drive mount about 4x slower.
+  cp "$src" "$work/in/$base"
+  if ! convert "$work/in/$base" "$out"; then
+    echo "FAIL $base: conversion failed" >&2
+    fail=1
+    continue
+  fi
+  rm "$work/in/$base"
+  cp "$out" "$dest/"
+  sync
+  if [[ $(sha256sum <"$out") == "$(sha256sum <"$target")" ]] && valid "$target"; then
+    echo "OK   Books/$subdir/$name.$ext"
+    if [[ -f $dest/$name.$other ]]; then
+      rm "$dest/$name.$other"
+      echo "     removed old Books/$subdir/$name.$other"
+    fi
+    if [[ -n $inbox ]]; then
+      mkdir -p "$inbox/Sent"
+      mv "$src" "$inbox/Sent/"
+    fi
+  else
+    echo "FAIL Books/$subdir/$name.$ext: checksum or format check failed" >&2
+    fail=1
+  fi
+  rm -f "$out" "$out.log"
+done
+
+if ((fail)); then
+  echo "kobo-send: errors above, leaving $mnt mounted" >&2
+elif ((eject)); then
+  cd /
+  sudo umount "$mnt"
+  powershell.exe -NoProfile -Command \
+    "(New-Object -ComObject Shell.Application).Namespace(17).ParseName('$letter:').InvokeVerb('Eject')"
+  echo "ejected $letter:. Unplug once it is gone from Explorer."
+fi
+exit "$fail"
