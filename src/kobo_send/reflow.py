@@ -38,7 +38,8 @@ SKIP_BLOCKS = {"PageHeader", "PageFooter"}
 REF = re.compile(r"<content-ref src=['\"]([^'\"]+)['\"]></content-ref>")
 HEADING = re.compile(r"^\s*<h([1-6])\b")
 TAGS = re.compile(r"<[^>]+>")
-CHAPTER_LEVEL = 2  # a heading at this level or higher starts a new chapter
+CHAPTER_LEVEL = 1  # without PDF bookmarks, a heading at this level or higher starts a new chapter
+MAX_CHAPTERS = 100  # with PDF bookmarks, split at the deepest level that gives at most this many chapters
 CAPTION_GAP = 20.0  # points between a listing caption and the code below it
 PDFTEXT_BATCH = 50  # pages for each pdftext call, to limit memory with keep_chars
 MIN_CHARS_PER_PAGE = 50  # below this, the PDF has no usable text layer
@@ -221,6 +222,58 @@ def page_parts(mpage: dict, lines: list[dict], images: Images) -> list[Part]:
     return parts
 
 
+def split_depth(outline: list[tuple[int, str, int]]) -> int:
+    """The deepest bookmark level that splits the book into at most MAX_CHAPTERS chapters."""
+    depth = 0
+    for level in sorted({lvl for lvl, _, _ in outline}):
+        if sum(1 for lvl, _, _ in outline if lvl <= level) > MAX_CHAPTERS:
+            break
+        depth = level
+    return depth
+
+
+def build(
+    pages: list[tuple[int, list[Part]]], outline: list[tuple[int, str, int]], book_title: str
+) -> tuple[list[epub.Chapter], list[epub.TocEntry] | None]:
+    """Split the pages into chapters at the PDF bookmarks, and turn every bookmark into a TOC entry.
+
+    Each page starts with an anchor, so a bookmark inside a chapter links to its page.
+    Without bookmarks, fall back to the headings and a flat table of contents.
+    """
+    if not outline:
+        return chapters([part for _, parts in pages for part in parts], book_title), None
+    depth = split_depth(outline)
+    starts: dict[int, str] = {}
+    for level, title, page in outline:
+        if level <= depth:
+            starts.setdefault(page, title)
+    out: list[epub.Chapter] = []
+    body: list[str] = []
+    title = book_title
+    first_page: list[int] = []
+    chapter_of: dict[int, int] = {}
+    for number, parts in pages:
+        if number in starts and body:
+            out.append(epub.Chapter(title, "\n".join(body)))
+            body = []
+        if not body:  # the first page of a chapter
+            first_page.append(number)
+            title = starts.get(number, title)
+        chapter_of[number] = len(out)
+        body.append(f'<span id="p{number}"></span>')
+        body += [p.html for p in parts]
+    if body:
+        out.append(epub.Chapter(title, "\n".join(body)))
+    toc = []
+    for level, entry_title, page in outline:
+        if page not in chapter_of:
+            continue
+        i = chapter_of[page]
+        anchor = "" if first_page[i] == page else f"#p{page}"
+        toc.append(epub.TocEntry(level, entry_title, f"text/{epub.chapter_name(i)}{anchor}"))
+    return out, toc
+
+
 def chapters(parts: list[Part], book_title: str) -> list[epub.Chapter]:
     """Start a new chapter at each heading of level CHAPTER_LEVEL or higher."""
     out: list[epub.Chapter] = []
@@ -269,16 +322,30 @@ def pdf_lines(pdf: Path, pages: list[int]) -> dict[int, list[dict]]:
     return out
 
 
-def pdf_info(pdf: Path) -> tuple[str, str, bytes | None]:
-    """Return the title, the author and a JPEG of the first page as the cover."""
+@dataclass
+class Info:
+    title: str
+    author: str
+    cover: bytes
+    outline: list[tuple[int, str, int]]  # (level, title, page index) for each bookmark
+
+
+def pdf_info(pdf: Path) -> Info:
+    """Read the metadata and the bookmarks, and render the first page as the cover."""
     import pypdfium2
 
     doc = pypdfium2.PdfDocument(str(pdf))
     meta = doc.get_metadata_dict()
+    outline = []
+    for mark in doc.get_toc():
+        dest = mark.get_dest()
+        page = dest.get_index() if dest else None
+        if page is not None:
+            outline.append((mark.level, " ".join(mark.get_title().split()), page))
     image = doc[0].render(scale=1.5).to_pil().convert("RGB")
     buf = io.BytesIO()
     image.save(buf, "JPEG", quality=85)
-    return (meta.get("Title") or "").strip(), (meta.get("Author") or "").strip(), buf.getvalue()
+    return Info((meta.get("Title") or "").strip(), (meta.get("Author") or "").strip(), buf.getvalue(), outline)
 
 
 def convert(pdf: Path, out: Path) -> None:
@@ -290,10 +357,11 @@ def convert(pdf: Path, out: Path) -> None:
     if sum(len(l["text"]) for page in lines.values() for l in page) < MIN_CHARS_PER_PAGE * max(len(numbers), 1):
         raise ReflowError("the PDF has almost no text layer, probably a scan. Use the fit mode for it.")
     images = Images()
-    parts = [part for mpage, n in zip(mpages, numbers) for part in page_parts(mpage, lines[n], images)]
-    title, author, cover = pdf_info(pdf)
-    title = title or pdf.stem
-    epub.write(out, title=title, author=author, chapters=chapters(parts, title), images=images.files, cover=cover)
+    pages = [(n, page_parts(mpage, lines[n], images)) for mpage, n in zip(mpages, numbers)]
+    info = pdf_info(pdf)
+    title = info.title or pdf.stem
+    book, toc = build(pages, info.outline, title)
+    epub.write(out, title=title, author=info.author, chapters=book, images=images.files, cover=info.cover, toc=toc)
 
 
 def main(argv: list[str] | None = None) -> int:

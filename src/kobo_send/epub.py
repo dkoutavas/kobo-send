@@ -17,7 +17,8 @@ KEEP_TAGS = {
     "blockquote", "img", "br", "hr", "span", "div", "figure", "figcaption",
 }
 VOID_TAGS = {"br", "hr", "img"}
-KEEP_ATTRS = {"href", "src", "alt", "colspan", "rowspan", "class"}
+KEEP_ATTRS = {"href", "src", "alt", "colspan", "rowspan", "class", "id"}
+PAGE_ANCHOR = re.compile(r"p\d+")  # the only ids kept: page anchors that the table of contents links to
 # Characters that XML 1.0 does not allow. PDF text layers contain some of them.
 _BAD_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
 
@@ -44,6 +45,17 @@ class Chapter:
     body: str  # HTML fragment. write() cleans it to XHTML.
 
 
+@dataclass(frozen=True)
+class TocEntry:
+    level: int  # 0 is the top level
+    title: str
+    href: str  # relative to OEBPS, for example "text/ch0003.xhtml#p170"
+
+
+def chapter_name(index: int) -> str:
+    return f"ch{index + 1:04d}.xhtml"
+
+
 def esc(text: str) -> str:
     return html.escape(_BAD_XML.sub("", text))
 
@@ -64,6 +76,8 @@ class _Cleaner(HTMLParser):
             value = value or ""
             # marker writes in-page anchors that do not exist in the EPUB. Keep web links only.
             if name not in KEEP_ATTRS or (name == "href" and not value.startswith(("http://", "https://"))):
+                continue
+            if name == "id" and not PAGE_ANCHOR.fullmatch(value):
                 continue
             kept.append(f' {name}="{esc(value)}"')
         if tag in VOID_TAGS:
@@ -105,11 +119,17 @@ def write(
     chapters: list[Chapter],
     images: dict[str, bytes],
     cover: bytes | None = None,
+    toc: list[TocEntry] | None = None,
     language: str = "en",
 ) -> None:
-    """Write an EPUB 3 file with an EPUB 2 NCX table of contents as well, for older readers."""
+    """Write an EPUB 3 file with an EPUB 2 NCX table of contents as well, for older readers.
+
+    Without a toc, the table of contents lists the chapters.
+    """
     uid = f"urn:uuid:{uuid.uuid4()}"
-    names = [f"ch{i:04d}.xhtml" for i in range(1, len(chapters) + 1)]
+    names = [chapter_name(i) for i in range(len(chapters))]
+    if toc is None:
+        toc = [TocEntry(0, c.title, f"text/{n}") for n, c in zip(names, chapters)]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         # The mimetype entry must come first and must not be compressed.
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
@@ -121,8 +141,8 @@ def write(
             z.writestr(f"OEBPS/images/{name}", data)
         if cover:
             z.writestr("OEBPS/images/cover.jpg", cover)
-        z.writestr("OEBPS/nav.xhtml", _nav(names, chapters, language))
-        z.writestr("OEBPS/toc.ncx", _ncx(uid, title, names, chapters))
+        z.writestr("OEBPS/nav.xhtml", _nav(toc, language))
+        z.writestr("OEBPS/toc.ncx", _ncx(uid, title, toc))
         z.writestr("OEBPS/content.opf", _opf(uid, title, author, language, names, images, cover is not None))
 
 
@@ -135,22 +155,46 @@ def _page(title: str, body: str, language: str) -> str:
     )
 
 
-def _nav(names: list[str], chapters: list[Chapter], language: str) -> str:
-    items = "\n".join(f'<li><a href="text/{n}">{esc(c.title)}</a></li>' for n, c in zip(names, chapters))
+def _depths(toc: list[TocEntry]) -> list[int]:
+    """Nesting depth of each entry. A level can go down one step at a time only."""
+    depths: list[int] = []
+    for e in toc:
+        depths.append(0 if not depths else max(0, min(e.level, depths[-1] + 1)))
+    return depths
+
+
+def _nav(toc: list[TocEntry], language: str) -> str:
+    out, cur = ["<ol>"], 0
+    for i, (e, d) in enumerate(zip(toc, _depths(toc))):
+        if i:
+            # A deeper entry opens a list inside the open <li>. Otherwise close back to its depth.
+            out.append("<ol>" if d > cur else "</li>" + "</ol></li>" * (cur - d))
+        out.append(f'<li><a href="{esc(e.href)}">{esc(e.title)}</a>')
+        cur = d
+    out.append(("</li>" + "</ol></li>" * cur) if toc else "")
+    out.append("</ol>")
+    items = "\n".join(out)
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n'
         '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" '
         f'xml:lang="{language}" lang="{language}">\n<head><title>Contents</title></head>\n'
-        f'<body><nav epub:type="toc"><h1>Contents</h1><ol>\n{items}\n</ol></nav></body>\n</html>\n'
+        f'<body><nav epub:type="toc"><h1>Contents</h1>\n{items}\n</nav></body>\n</html>\n'
     )
 
 
-def _ncx(uid: str, title: str, names: list[str], chapters: list[Chapter]) -> str:
-    points = "\n".join(
-        f'<navPoint id="np{i}" playOrder="{i}"><navLabel><text>{esc(c.title)}</text></navLabel>'
-        f'<content src="text/{n}"/></navPoint>'
-        for i, (n, c) in enumerate(zip(names, chapters), 1)
-    )
+def _ncx(uid: str, title: str, toc: list[TocEntry]) -> str:
+    out, cur = [], 0
+    for i, (e, d) in enumerate(zip(toc, _depths(toc))):
+        if i and d <= cur:
+            out.append("</navPoint>" * (cur - d + 1))
+        out.append(
+            f'<navPoint id="np{i + 1}" playOrder="{i + 1}"><navLabel><text>{esc(e.title)}</text></navLabel>'
+            f'<content src="{esc(e.href)}"/>'
+        )
+        cur = d
+    if toc:
+        out.append("</navPoint>" * (cur + 1))
+    points = "\n".join(out)
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n'

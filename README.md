@@ -86,7 +86,7 @@ Reflow mode makes a reflowable book from a PDF and keeps the code listings corre
 2. marker labels each line of a code listing as a separate paragraph, so the indentation is lost. kobo-send finds the lines in a fixed-pitch font with pdftext. It places each glyph at its column and writes the listing as preformatted text. This restores the indentation and the column alignment, for example in command output tables.
 3. Prose that marker merged into a listing, such as a margin note, becomes a separate note.
 4. A listing caption moves in front of its listing.
-5. Headings of level 1 and 2 start a new chapter. The table of contents lists the chapters. The first page of the PDF becomes the cover.
+5. The PDF bookmarks give the chapters and the table of contents. The book is split at the deepest bookmark level that gives at most 100 chapters. Every bookmark becomes a table of contents entry that links to its page. A PDF without bookmarks is split at its level 1 headings. The first page of the PDF becomes the cover.
 6. kepubify converts the EPUB to KEPUB.
 
 Set up the marker environment once. It needs about 6 GB:

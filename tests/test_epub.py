@@ -17,6 +17,9 @@ class CleanerTest(unittest.TestCase):
         out = epub.to_xhtml('<a href="#page-3">x</a> <a href="https://k8s.io">y</a>')
         self.assertEqual(out, '<a>x</a> <a href="https://k8s.io">y</a>')
 
+    def test_keeps_page_anchor_ids_only(self):
+        self.assertEqual(epub.to_xhtml('<span id="p170"></span><p id="x">a</p>'), '<span id="p170"></span><p>a</p>')
+
     def test_drops_characters_xml_forbids(self):
         self.assertEqual(epub.to_xhtml("<p>a\x0cb\x00</p>"), "<p>ab</p>")
 
@@ -64,6 +67,34 @@ class WriteTest(unittest.TestCase):
         self.assertIn('properties="cover-image"', opf)
         self.assertIn("<dc:title>T &amp; T</dc:title>", opf)
         self.assertIn('<a href="text/ch0002.xhtml">Two</a>', nav)
+
+
+class NestedTocTest(unittest.TestCase):
+    def test_nav_and_ncx_nest_by_level(self):
+        d = Path(tempfile.mkdtemp())
+        try:
+            toc = [
+                epub.TocEntry(0, "Part 1", "text/ch0001.xhtml"),
+                epub.TocEntry(1, "1 Intro", "text/ch0001.xhtml#p3"),
+                epub.TocEntry(3, "deep", "text/ch0001.xhtml#p4"),  # a jump of two levels nests one step
+                epub.TocEntry(0, "Part 2", "text/ch0002.xhtml"),
+            ]
+            path = d / "b.epub"
+            chapters = [epub.Chapter("a", "<p>a</p>"), epub.Chapter("b", "<p>b</p>")]
+            epub.write(path, title="B", author="", chapters=chapters, images={}, toc=toc)
+            with zipfile.ZipFile(path) as z:
+                nav = ET.fromstring(z.read("OEBPS/nav.xhtml"))
+                ncx = ET.fromstring(z.read("OEBPS/toc.ncx"))
+        finally:
+            shutil.rmtree(d)
+        ns = {"h": "http://www.w3.org/1999/xhtml", "n": "http://www.daisy.org/z3986/2005/ncx/"}
+        top = nav.findall(".//h:nav/h:ol/h:li", ns)
+        self.assertEqual([li.find("h:a", ns).text for li in top], ["Part 1", "Part 2"])
+        self.assertEqual(top[0].find("h:ol/h:li/h:a", ns).text, "1 Intro")
+        self.assertEqual(top[0].find("h:ol/h:li/h:ol/h:li/h:a", ns).text, "deep")
+        points = ncx.findall("n:navMap/n:navPoint", ns)
+        self.assertEqual([p.find("n:navLabel/n:text", ns).text for p in points], ["Part 1", "Part 2"])
+        self.assertEqual(points[0].find("n:navPoint/n:navPoint/n:content", ns).get("src"), "text/ch0001.xhtml#p4")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 import base64
 import unittest
+from unittest import mock
 
 from kobo_send import reflow
 
@@ -118,18 +119,41 @@ class PageTest(unittest.TestCase):
 
 
 class ChapterTest(unittest.TestCase):
-    def test_split_at_level_two_headings(self):
+    def test_without_bookmarks_split_at_level_one_headings(self):
         parts = [
             reflow.Part("<p>front</p>"),
             reflow.Part("<h1>Intro</h1>", 1, "Intro"),
-            reflow.Part("<p>a</p>"),
-            reflow.Part("<h3>detail</h3>", 3, "detail"),
-            reflow.Part("<h2>Next</h2>", 2, "Next"),
+            reflow.Part("<h2>Sub</h2>", 2, "Sub"),
+            reflow.Part("<h1>Next</h1>", 1, "Next"),
             reflow.Part("<p>b</p>"),
         ]
-        chapters = reflow.chapters(parts, "Book")
+        chapters, toc = reflow.build([(0, parts)], [], "Book")
+        self.assertIsNone(toc)
         self.assertEqual([c.title for c in chapters], ["Book", "Intro", "Next"])
-        self.assertIn("<h3>detail</h3>", chapters[1].body)
+        self.assertIn("<h2>Sub</h2>", chapters[1].body)
+
+    def test_split_depth_keeps_the_chapter_count_low(self):
+        outline = [(0, "Part", 0)] * 17 + [(1, "Chapter", 0)] * 61 + [(2, "Section", 0)] * 118
+        self.assertEqual(reflow.split_depth(outline), 1)
+        self.assertEqual(reflow.split_depth([(0, "Ch", 0)] * 24 + [(1, "Sec", 0)] * 141), 0)
+
+    def test_bookmarks_split_chapters_and_link_to_pages(self):
+        pages = [(n, [reflow.Part(f"<p>page {n}</p>")]) for n in range(6)]
+        outline = [(0, "Front", 0), (0, "1 Intro", 2), (1, "1.1 Why", 3), (0, "2 Pods", 4)]
+        # Three top-level bookmarks fit the limit, four with the section do not: split at level 0.
+        with mock.patch.object(reflow, "MAX_CHAPTERS", 3):
+            chapters, toc = reflow.build(pages, outline, "Book")
+        self.assertEqual([c.title for c in chapters], ["Front", "1 Intro", "2 Pods"])
+        self.assertIn('<span id="p3"></span>', chapters[1].body)
+        self.assertEqual(
+            [(e.level, e.title, e.href) for e in toc],
+            [
+                (0, "Front", "text/ch0001.xhtml"),
+                (0, "1 Intro", "text/ch0002.xhtml"),
+                (1, "1.1 Why", "text/ch0002.xhtml#p3"),
+                (0, "2 Pods", "text/ch0003.xhtml"),
+            ],
+        )
 
 
 if __name__ == "__main__":
