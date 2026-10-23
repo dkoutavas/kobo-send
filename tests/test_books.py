@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from kobo_send import books
+from kobo_send import books, config
 
 
 class PlanTest(unittest.TestCase):
@@ -22,6 +22,12 @@ class PlanTest(unittest.TestCase):
     def test_other_format_is_replaced(self):
         self.assertEqual(books.plan("a.pdf").other, "a.kepub.epub")
         self.assertEqual(books.plan("a.epub").other, "a.pdf")
+
+    def test_reflow_turns_a_pdf_into_a_kepub_that_replaces_the_pdf(self):
+        p = books.plan("a.pdf", "reflow")
+        self.assertEqual(p.target, "a.kepub.epub")
+        self.assertEqual(p.other, "a.pdf")
+        self.assertEqual(books.plan("a.epub", "reflow").target, "a.kepub.epub")
 
     def test_clean_name(self):
         raw = (
@@ -66,7 +72,7 @@ class FileCheckTest(unittest.TestCase):
         src = self.dir / "a.kepub.epub"
         src.write_bytes(b"data")
         out = self.dir / "out.kepub.epub"
-        books.convert(src, out, "koc")
+        books.convert(src, out, config.Config())
         self.assertEqual(out.read_bytes(), b"data")
 
     def test_convert_reports_missing_tool(self):
@@ -74,7 +80,14 @@ class FileCheckTest(unittest.TestCase):
         src.write_bytes(b"data")
         with mock.patch.dict(os.environ, {"PATH": str(self.dir)}):
             with self.assertRaisesRegex(books.ConversionError, "kepubify is not installed"):
-                books.convert(src, self.dir / "out.kepub.epub", "koc")
+                books.convert(src, self.dir / "out.kepub.epub", config.Config())
+
+    def test_reflow_reports_missing_marker_environment(self):
+        src = self.dir / "a.pdf"
+        src.write_bytes(b"%PDF-1.7\n")
+        cfg = config.Config(pdf_mode="reflow", marker_python=str(self.dir / "nope" / "python"))
+        with self.assertRaisesRegex(books.ConversionError, "marker environment not found"):
+            books.convert(src, self.dir / "a.kepub.epub", cfg)
 
 
 if __name__ == "__main__":

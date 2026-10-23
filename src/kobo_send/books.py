@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import subprocess
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from .config import Config
+
+# The directory that holds the kobo_send package. The reflow subprocess imports it from here.
+SRC_DIR = Path(__file__).resolve().parent.parent
 
 # Longest suffix first, so "x.kepub.epub" does not match as ".epub".
 SUFFIXES = (".kepub.epub", ".epub", ".pdf")
@@ -47,12 +53,12 @@ class Plan:
         return f"{self.name}.{'kepub.epub' if self.ext == 'pdf' else 'pdf'}"
 
 
-def plan(source_name: str) -> Plan | None:
+def plan(source_name: str, pdf_mode: str = "fit") -> Plan | None:
     """Return the plan for a file name, or None if the file is not an EPUB or a PDF."""
     lower = source_name.lower()
     for suffix in SUFFIXES:
         if lower.endswith(suffix):
-            ext = "pdf" if suffix == ".pdf" else "kepub.epub"
+            ext = "pdf" if suffix == ".pdf" and pdf_mode == "fit" else "kepub.epub"
             return Plan(source_name, clean_name(source_name[: -len(suffix)]), ext)
     return None
 
@@ -61,26 +67,55 @@ def clean_name(stem: str) -> str:
     return _ISBN_TAIL.sub("", _SITE_PREFIX.sub("", stem))
 
 
-def convert(src: Path, out: Path, k2pdfopt_device: str) -> None:
+def convert(src: Path, out: Path, cfg: Config) -> None:
     """Write src to out in the format the Kobo gets. Raise ConversionError on failure."""
     lower = src.name.lower()
     if lower.endswith(".kepub.epub"):
         shutil.copyfile(src, out)
         return
+    if lower.endswith(".pdf") and cfg.pdf_mode == "reflow":
+        _reflow(src, out, Path(cfg.marker_python).expanduser())
+        return
     if lower.endswith(".pdf"):
-        cmd = ["k2pdfopt", *K2PDFOPT_ARGS, "-dev", k2pdfopt_device, "-o", str(out), str(src)]
+        _run(["k2pdfopt", *K2PDFOPT_ARGS, "-dev", cfg.k2pdfopt_device, "-o", str(out), str(src)], out)
     else:
-        # kepubify treats -o as a file path only for one input and an -o path that does not exist.
-        cmd = ["kepubify", "-o", str(out), str(src)]
+        _run(_kepubify(src, out), out)
+
+
+def _reflow(src: Path, out: Path, python: Path) -> None:
+    """PDF to EPUB with marker in its own environment, then EPUB to KEPUB with kepubify."""
+    if not python.is_file():
+        raise ConversionError(f"marker environment not found: {python}. See the README, section Reflow mode.")
+    epub = out.with_name(out.name.removesuffix(".kepub.epub") + ".epub")
+    try:
+        cmd = [str(python), "-m", "kobo_send.reflow", str(src), str(epub)]
+        _run(cmd, epub, label="reflow", env={"PYTHONPATH": str(SRC_DIR)})
+        _run(_kepubify(epub, out), out)
+    finally:
+        epub.unlink(missing_ok=True)
+
+
+def _kepubify(src: Path, out: Path) -> list[str]:
+    # kepubify treats -o as a file path only for one input and an -o path that does not exist.
+    return ["kepubify", "-o", str(out), str(src)]
+
+
+def _run(cmd: list[str], out: Path, label: str | None = None, env: dict[str, str] | None = None) -> None:
+    label = label or cmd[0]
     try:
         result = subprocess.run(
-            cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace"
+            cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            env={**os.environ, **env} if env else None,
         )
     except FileNotFoundError:
-        raise ConversionError(f"{cmd[0]} is not installed") from None
+        raise ConversionError(f"{label} is not installed") from None
     if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
         tail = "\n".join((result.stdout + result.stderr).splitlines()[-20:])
-        raise ConversionError(f"{cmd[0]} failed (exit {result.returncode})\n{tail}")
+        raise ConversionError(f"{label} failed (exit {result.returncode})\n{tail}")
 
 
 def sha256(path: Path) -> str:

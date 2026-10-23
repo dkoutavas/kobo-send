@@ -28,6 +28,11 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown keys: inbx"):
             config.load(self.file)
 
+    def test_pdf_mode_must_be_known(self):
+        self.file.write_text('pdf_mode = "ocr"\n')
+        with self.assertRaisesRegex(ValueError, "pdf_mode must be one of: fit, reflow"):
+            config.load(self.file)
+
     def test_value_must_be_a_string(self):
         self.file.write_text("subdir = 3\n")
         with self.assertRaisesRegex(ValueError, "must be strings: subdir"):

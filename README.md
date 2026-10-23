@@ -3,7 +3,7 @@
 Send EPUB and PDF books to a Kobo e-reader over USB.
 
 - EPUB files are converted to KEPUB with kepubify. KEPUB is the native Kobo format.
-- PDF files are fitted to the Kobo screen with k2pdfopt. The tool does not reflow the text, so code listings and margin notes keep their layout.
+- PDF files are fitted to the Kobo screen with k2pdfopt (fit mode), or converted to reflowable KEPUB with marker (reflow mode). In both modes, code listings keep their layout.
 - Each book is checked on the Kobo after the copy (SHA-256 and a format check).
 - A book replaces the other format of the same name on the Kobo. For example, `X.pdf` replaces `X.kepub.epub`.
 - At the end, the Kobo is unmounted and powered off, so it is safe to unplug.
@@ -67,12 +67,48 @@ If a book fails, the tool continues with the next book. At the end, it keeps the
 
 ## PDF handling
 
-A PDF has fixed page positions, not a text flow. Two approaches were tested:
+A PDF has fixed page positions, not a text flow. kobo-send has two PDF modes. Select one with `--pdf` or with `pdf_mode` in the settings.
 
-- Calibre (`ebook-convert`) PDF to EPUB guesses the text flow from word positions. It splits watermarks into one paragraph per word and mixes margin notes into code. The result is not reliable.
+| Mode | Output on the Kobo | Font size can change | Needs |
+|---|---|---|---|
+| `fit` (default) | PDF, each page fitted to the screen | no | k2pdfopt |
+| `reflow` | KEPUB with reflowable text | yes | the marker environment |
+
+### Fit mode
+
+kobo-send uses k2pdfopt with `-wrap- -col 1 -n`. This fits each page region to the screen width without reflow, and keeps the vector text. The page layout stays correct. k2pdfopt takes about 0.2 to 0.5 seconds for each source page.
+
+### Reflow mode
+
+Reflow mode makes a reflowable book from a PDF and keeps the code listings correct:
+
+1. marker 2.0 (fast mode, OCR off) reads the PDF text layer and finds the layout: paragraphs, headings, tables, figures and captions.
+2. marker labels each line of a code listing as a separate paragraph, so the indentation is lost. kobo-send finds the lines in a fixed-pitch font with pdftext. It places each glyph at its column and writes the listing as preformatted text. This restores the indentation and the column alignment, for example in command output tables.
+3. Prose that marker merged into a listing, such as a margin note, becomes a separate note.
+4. A listing caption moves in front of its listing.
+5. Headings of level 1 and 2 start a new chapter. The table of contents lists the chapters. The first page of the PDF becomes the cover.
+6. kepubify converts the EPUB to KEPUB.
+
+Set up the marker environment once. It needs about 6 GB:
+
+```bash
+python3.13 -m venv ~/.local/share/kobo-send/marker
+~/.local/share/kobo-send/marker/bin/pip install marker-pdf==2.0.0
+```
+
+The first run downloads the marker layout models. A GPU makes marker faster, but it is not necessary. Fast mode with OCR off does not start the marker inference server.
+
+Limits:
+
+- The PDF must have a text layer. A scanned PDF fails with an error. Use fit mode for it.
+- Mathematical equations and complex tables can be imperfect.
+- The marker code is Apache-2.0. The marker model weights have a modified OpenRAIL-M license: personal use is free.
+
+Other approaches that were tested and rejected:
+
+- Calibre (`ebook-convert`) PDF to EPUB splits watermarks into one paragraph per word and mixes margin notes into code.
 - k2pdfopt with reflow (`-wrap`) also mixes margin notes into code and breaks tables.
-
-kobo-send uses k2pdfopt with `-wrap- -col 1 -n`. This fits each page region to the screen width without reflow, and keeps the vector text. You cannot change the font size on the Kobo, but the page layout stays correct. k2pdfopt takes about 0.2 to 0.5 seconds for each source page.
+- marker balanced mode (a vision language model through llama.cpp) is about 7 times slower and also loses the code indentation.
 
 ## Tests
 

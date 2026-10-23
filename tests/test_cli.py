@@ -29,7 +29,7 @@ class SendTest(unittest.TestCase):
     def send(self, job):
         out = io.StringIO()
         with redirect_stdout(out), redirect_stderr(out):
-            ok = cli._send(job, self.dest, self.work, config.Config(), "Technical")
+            ok = cli._send(job, self.dest, self.work, config.Config())
         return ok, out.getvalue()
 
     def test_local_book_lands_and_replaces_the_pdf(self):
