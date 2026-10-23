@@ -50,7 +50,7 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="kobo-send",
         description="Convert EPUB to KEPUB (kepubify) and PDF to a screen-fitted PDF (k2pdfopt) "
-        "or a reflowable KEPUB (marker), then copy the books to the Kobo, check them and eject it.",
+        "or a reflowable KEPUB (marker), then copy the books to the Kobo, check them and unmount it.",
     )
     p.add_argument(
         "files",
@@ -64,7 +64,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "-k", "--keep", action="store_true",
-        help="keep the Kobo mounted afterwards (default: unmount and power it off)",
+        help="keep the Kobo mounted afterwards (default: unmount it)",
     )
     p.add_argument(
         "--pdf", choices=books.PDF_MODES, default=PDF_MODE,
@@ -101,8 +101,8 @@ def _run(args: argparse.Namespace) -> int:
         print(f"kobo-send: errors above, leaving {mnt} mounted", file=sys.stderr)
         return 1
     if not args.keep:
-        device.eject(block)
-        print("ejected. Safe to unplug.")
+        device.unmount(block)
+        print("unmounted. Unplug the Kobo now. It imports the new books after you unplug it.")
     return 0
 
 

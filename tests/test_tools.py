@@ -43,18 +43,12 @@ class DeviceTest(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
 
     @mock.patch("subprocess.run")
-    def test_eject_powers_off_the_parent_disk(self, run):
-        run.side_effect = [done("sdb\n"), done(), done()]
-        device.eject("/dev/sdb1")
-        cmds = [c.args[0] for c in run.call_args_list]
-        self.assertEqual(cmds[1][:4], ["udisksctl", "unmount", "--block-device", "/dev/sdb1"])
-        self.assertEqual(cmds[2][:4], ["udisksctl", "power-off", "--block-device", "/dev/sdb"])
-
-    @mock.patch("subprocess.run")
-    def test_eject_whole_disk_without_partitions(self, run):
-        run.side_effect = [done("\n"), done(), done()]
-        device.eject("/dev/sdb")
-        self.assertEqual(run.call_args_list[2].args[0][3], "/dev/sdb")
+    def test_unmount_does_not_power_off(self, run):
+        # A power-off stops the Kobo from importing the new books.
+        run.return_value = done()
+        device.unmount("/dev/sdb")
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0][:4], ["udisksctl", "unmount", "--block-device", "/dev/sdb"])
 
 
 if __name__ == "__main__":

@@ -6,13 +6,13 @@ Send EPUB and PDF books to a Kobo e-reader over USB.
 - PDF files are fitted to the Kobo screen with k2pdfopt (fit mode), or converted to reflowable KEPUB with marker (reflow mode). In both modes, code listings keep their layout.
 - Each book is checked on the Kobo after the copy (SHA-256 and a format check).
 - A book replaces the other format of the same name on the Kobo. For example, `X.pdf` replaces `X.kepub.epub`.
-- At the end, the Kobo is unmounted and powered off, so it is safe to unplug.
+- At the end, `kobo-send` unmounts the Kobo. Then unplug the cable. The Kobo adds the new books to its library only after you unplug it.
 
 With no arguments, `kobo-send` sends every EPUB and PDF in an inbox folder on Google Drive. Each sent file moves to the `Sent` subfolder of the inbox, so the next run skips it.
 
 ## Requirements
 
-- Linux with a desktop session. udisks2 lets the user of the active local session mount the Kobo without root. Over SSH, mount and eject fail with "Not authorized".
+- Linux with a desktop session. udisks2 lets the user of the active local session mount the Kobo without root. Over SSH, mount and unmount fail with "Not authorized".
 - Python 3.11 or later. The tool uses the standard library only.
 - [kepubify](https://github.com/pgaskin/kepubify/releases) v4.0.4, `kepubify-linux-64bit`.
 - [k2pdfopt](https://www.willus.com/k2pdfopt/download/) v2.55, Linux 64-bit. The download page has a captcha, so use a browser. Use v2.55, not v2.54: v2.54 drops the PDF bookmarks, and the Kobo uses them as the table of contents.

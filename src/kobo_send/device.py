@@ -1,7 +1,7 @@
-"""Find, mount and eject the Kobo with udisks2.
+"""Find, mount and unmount the Kobo with udisks2.
 
 udisks2 lets the user of the active local desktop session mount removable drives
-without root. Over SSH the session is not active, so mount and eject fail with
+without root. Over SSH the session is not active, so mount and unmount fail with
 "Not authorized".
 """
 
@@ -33,23 +33,21 @@ def mount(block: str) -> Path:
     return point
 
 
-def eject(block: str) -> None:
-    """Unmount the filesystem and power off the drive, so that it is safe to unplug."""
-    disk = _parent(block)
+def unmount(block: str) -> None:
+    """Unmount the filesystem, so that it is safe to unplug.
+
+    Do not power off the drive. The Kobo rejects the SCSI eject command, so
+    udisksctl power-off removes the device through sysfs instead. After that,
+    the Kobo skips its "Importing content" scan and the new books do not show.
+    The scan runs when the user unplugs the cable.
+    """
     _udisksctl("unmount", "--block-device", block)
-    _udisksctl("power-off", "--block-device", disk)
 
 
 def _mountpoint(block: str) -> Path | None:
     out = _lsblk("--json", "--output", "MOUNTPOINTS", block)
     points = [p for p in json.loads(out)["blockdevices"][0]["mountpoints"] if p]
     return Path(points[0]) if points else None
-
-
-def _parent(block: str) -> str:
-    """Return the whole disk that holds block. A filesystem without partitions is its own disk."""
-    pkname = _lsblk("--noheadings", "--output", "PKNAME", block).strip()
-    return f"/dev/{pkname}" if pkname else block
 
 
 def _lsblk(*args: str) -> str:
