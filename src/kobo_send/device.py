@@ -1,9 +1,4 @@
-"""Find, mount and unmount the Kobo with udisks2.
-
-udisks2 lets the user of the active local desktop session mount removable drives
-without root. Over SSH the session is not active, so mount and unmount fail with
-"Not authorized".
-"""
+"""Find, mount and unmount the Kobo with udisks2. Over SSH, udisks2 answers "Not authorized"."""
 
 from __future__ import annotations
 
@@ -34,26 +29,16 @@ def mount(block: str) -> Path:
 
 
 def unmount(block: str) -> None:
-    """Unmount the filesystem, so that it is safe to unplug.
-
-    Do not power off the drive. The Kobo rejects the SCSI eject command, so
-    udisksctl power-off removes the device through sysfs instead. After that,
-    the Kobo skips its "Importing content" scan and the new books do not show.
-    The scan runs when the user unplugs the cable.
-    """
+    """Unmount only. The Kobo rejects the SCSI eject, so a power-off removes it through sysfs
+    and the Kobo skips its import scan. The scan runs when the user unplugs the cable."""
     _udisksctl("unmount", "--block-device", block)
 
 
 def _mountpoint(block: str) -> Path | None:
-    out = _lsblk("--json", "--output", "MOUNTPOINTS", block)
+    cmd = ["lsblk", "--nodeps", "--json", "--output", "MOUNTPOINTS", block]
+    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
     points = [p for p in json.loads(out)["blockdevices"][0]["mountpoints"] if p]
     return Path(points[0]) if points else None
-
-
-def _lsblk(*args: str) -> str:
-    return subprocess.run(
-        ["lsblk", "--nodeps", *args], capture_output=True, text=True, check=True
-    ).stdout
 
 
 def _udisksctl(*args: str) -> None:

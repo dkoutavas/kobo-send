@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
-# No <a>: the link areas of a PDF overlap the body text, so marker puts links on unrelated words.
-# A link is of little use on an e-reader, so the cleaner keeps the text and drops the link.
+LANGUAGE = "en"  # ponytail: every book is tagged English. Read the PDF /Lang entry if that matters.
+# No <a>: PDF link areas overlap the body text, so marker puts links on unrelated words.
 KEEP_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "code", "b", "strong", "i", "em", "u",
     "sub", "sup", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
@@ -120,7 +120,6 @@ def write(
     images: dict[str, bytes],
     cover: bytes | None = None,
     toc: list[TocEntry] | None = None,
-    language: str = "en",
 ) -> None:
     """Write an EPUB 3 file with an EPUB 2 NCX table of contents as well, for older readers.
 
@@ -136,20 +135,20 @@ def write(
         z.writestr("META-INF/container.xml", CONTAINER)
         z.writestr("OEBPS/style.css", CSS)
         for name, chapter in zip(names, chapters):
-            z.writestr(f"OEBPS/text/{name}", _page(chapter.title, to_xhtml(chapter.body), language))
+            z.writestr(f"OEBPS/text/{name}", _page(chapter.title, to_xhtml(chapter.body)))
         for name, data in images.items():
             z.writestr(f"OEBPS/images/{name}", data)
         if cover:
             z.writestr("OEBPS/images/cover.jpg", cover)
-        z.writestr("OEBPS/nav.xhtml", _nav(toc, language))
+        z.writestr("OEBPS/nav.xhtml", _nav(toc))
         z.writestr("OEBPS/toc.ncx", _ncx(uid, title, toc))
-        z.writestr("OEBPS/content.opf", _opf(uid, title, author, language, names, images, cover is not None))
+        z.writestr("OEBPS/content.opf", _opf(uid, title, author, names, images, cover is not None))
 
 
-def _page(title: str, body: str, language: str) -> str:
+def _page(title: str, body: str) -> str:
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n'
-        f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{language}" lang="{language}">\n'
+        f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{LANGUAGE}" lang="{LANGUAGE}">\n'
         f'<head><title>{esc(title)}</title><link rel="stylesheet" type="text/css" href="../style.css"/></head>\n'
         f"<body>\n{body}\n</body>\n</html>\n"
     )
@@ -163,7 +162,7 @@ def _depths(toc: list[TocEntry]) -> list[int]:
     return depths
 
 
-def _nav(toc: list[TocEntry], language: str) -> str:
+def _nav(toc: list[TocEntry]) -> str:
     out, cur = ["<ol>"], 0
     for i, (e, d) in enumerate(zip(toc, _depths(toc))):
         if i:
@@ -177,7 +176,7 @@ def _nav(toc: list[TocEntry], language: str) -> str:
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n'
         '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" '
-        f'xml:lang="{language}" lang="{language}">\n<head><title>Contents</title></head>\n'
+        f'xml:lang="{LANGUAGE}" lang="{LANGUAGE}">\n<head><title>Contents</title></head>\n'
         f'<body><nav epub:type="toc"><h1>Contents</h1>\n{items}\n</nav></body>\n</html>\n'
     )
 
@@ -204,13 +203,13 @@ def _ncx(uid: str, title: str, toc: list[TocEntry]) -> str:
 
 
 def _opf(
-    uid: str, title: str, author: str, language: str, names: list[str], images: dict[str, bytes], cover: bool
+    uid: str, title: str, author: str, names: list[str], images: dict[str, bytes], cover: bool
 ) -> str:
     modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     meta = [
         f'<dc:identifier id="uid">{uid}</dc:identifier>',
         f"<dc:title>{esc(title)}</dc:title>",
-        f"<dc:language>{language}</dc:language>",
+        f"<dc:language>{LANGUAGE}</dc:language>",
         f'<meta property="dcterms:modified">{modified}</meta>',
     ]
     if author:

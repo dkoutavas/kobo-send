@@ -26,19 +26,15 @@ class Fatal(Exception):
     pass
 
 
-class Failed(Exception):
-    pass
-
-
 @dataclass(frozen=True)
 class Job:
     plan: books.Plan
     local: Path | None  # a file from the command line; None means plan.source_name in the inbox
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     parser = _parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
     if args.pdf not in books.PDF_MODES:  # argparse does not check a default against choices
         parser.error(f"PDF_MODE in cli.py must be one of: {', '.join(books.PDF_MODES)}")
     try:
@@ -133,7 +129,7 @@ def _send(job: Job, dest: Path, work: Path, pdf_mode: str) -> bool:
     start = time.monotonic()
     try:
         _send_one(job, dest, work, pdf_mode)
-    except (Failed, books.ConversionError, inbox.InboxError, OSError) as e:
+    except (books.ConversionError, inbox.InboxError, OSError) as e:
         print(f"FAIL {p.source_name}: {e}", file=sys.stderr)
         return False
     print(f"OK   {p.target} ({time.monotonic() - start:.0f}s)")
@@ -160,7 +156,7 @@ def _send_one(job: Job, dest: Path, work: Path, pdf_mode: str) -> None:
         os.fsync(f.fileno())
     if books.sha256(out) != books.sha256(target) or not books.opens(target):
         target.unlink()  # a bad file on the Kobo is worse than no file
-        raise Failed("checksum or format check failed on the Kobo")
+        raise books.ConversionError("checksum or format check failed on the Kobo")
     out.unlink()
 
     old = dest / p.other

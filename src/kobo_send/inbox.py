@@ -18,7 +18,7 @@ class InboxError(Exception):
 
 def list_files(inbox: str) -> list[str]:
     """Return the names of the files directly in the inbox, sorted. Subfolders are not read."""
-    if _is_remote(inbox):
+    if _REMOTE.match(inbox):
         return sorted(e["Name"] for e in json.loads(_rclone("lsjson", "--files-only", inbox)))
     try:
         return sorted(p.name for p in _folder(inbox).iterdir() if p.is_file())
@@ -27,7 +27,7 @@ def list_files(inbox: str) -> list[str]:
 
 
 def fetch(inbox: str, name: str, dest: Path) -> None:
-    if _is_remote(inbox):
+    if _REMOTE.match(inbox):
         _rclone("copyto", _join(inbox, name), str(dest))
     else:
         shutil.copyfile(_folder(inbox) / name, dest)
@@ -35,16 +35,12 @@ def fetch(inbox: str, name: str, dest: Path) -> None:
 
 def archive(inbox: str, name: str, sent: str) -> None:
     """Move a sent file into the sent subfolder, so that the next run skips it."""
-    if _is_remote(inbox):
+    if _REMOTE.match(inbox):
         _rclone("moveto", _join(inbox, name), _join(inbox, f"{sent}/{name}"))
         return
     folder = _folder(inbox)
     (folder / sent).mkdir(exist_ok=True)
     (folder / name).rename(folder / sent / name)
-
-
-def _is_remote(inbox: str) -> bool:
-    return bool(_REMOTE.match(inbox))
 
 
 def _folder(inbox: str) -> Path:

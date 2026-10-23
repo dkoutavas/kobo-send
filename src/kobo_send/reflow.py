@@ -318,9 +318,7 @@ def build(
     """Split the pages into chapters at the PDF bookmarks, and turn every bookmark into a TOC entry.
 
     Each bookmark gets its own anchor (t0, t1, ...), at the heading it names, or else at the top
-    of its page. Shared targets are the suspected reason why a Kobo showed no table of contents
-    for a book with page anchors. Without bookmarks, fall back to the headings and a flat table
-    of contents.
+    of its page. Without bookmarks, fall back to the headings and a flat table of contents.
     """
     if not outline:
         return chapters([part for _, parts in pages for part in parts], book_title), None
@@ -453,8 +451,8 @@ def convert(pdf: Path, out: Path) -> None:
     epub.write(out, title=title, author=info.author, chapters=book, images=images, cover=info.cover, toc=toc)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+def main() -> int:
+    args = sys.argv[1:]
     if len(args) != 2:
         print("usage: python -m kobo_send.reflow BOOK.pdf OUT.epub", file=sys.stderr)
         return 2
