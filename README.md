@@ -8,7 +8,7 @@ Send EPUB and PDF books to a Kobo e-reader over USB.
 - A book replaces the other format of the same name on the Kobo. For example, `X.pdf` replaces `X.kepub.epub`.
 - At the end, `kobo-send` unmounts the Kobo. Then unplug the cable. The Kobo adds the new books to its library only after you unplug it.
 
-With no arguments, `kobo-send` sends every EPUB and PDF in an inbox folder on Google Drive. Each sent file moves to the `Sent` subfolder of the inbox, so the next run skips it.
+With no arguments, `kobo-send` sends every EPUB and PDF in an inbox folder. The inbox is a local folder or a folder on an rclone remote, for example Google Drive. Each sent file moves to the `Sent` subfolder of the inbox, so the next run skips it.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ With no arguments, `kobo-send` sends every EPUB and PDF in an inbox folder on Go
 - Python 3.11 or later. The tool uses the standard library only.
 - [kepubify](https://github.com/pgaskin/kepubify/releases) v4.0.4, `kepubify-linux-64bit`.
 - [k2pdfopt](https://www.willus.com/k2pdfopt/download/) v2.55, Linux 64-bit. The download page has a captcha, so use a browser. Use v2.55, not v2.54: v2.54 drops the PDF bookmarks, and the Kobo uses them as the table of contents.
-- [rclone](https://rclone.org/) with a Google Drive remote, for the inbox.
+- [rclone](https://rclone.org/), only for an inbox on a cloud remote. A local inbox folder needs no rclone. A folder that a sync client keeps (Dropbox, Syncthing, Google Drive for desktop) is a local folder.
 
 Known SHA-256 values of the binaries:
 
@@ -38,12 +38,21 @@ install -m755 k2pdfopt ~/.local/bin/k2pdfopt
 
 ## Configure
 
-There is no settings file. The defaults are constants at the top of two files. Edit them to change a default:
+To use an inbox, set `KOBO_SEND_INBOX` in your shell startup file, for example `~/.bashrc`. A value in the form `remote:path` is an rclone remote. Any other value is a local folder.
+
+```bash
+export KOBO_SEND_INBOX=~/kobo-inbox     # a local folder
+export KOBO_SEND_INBOX=gdrive:Books     # a folder on the rclone remote "gdrive"
+```
+
+There is no default inbox. Without `KOBO_SEND_INBOX`, `kobo-send` sends only the files that you name.
+
+There is no settings file. The other defaults are constants at the top of two files. Edit them to change a default:
 
 | Constant | File | Default |
 |---|---|---|
-| `INBOX`, `SENT` | `src/kobo_send/cli.py` | `gdrive:Books`, `Sent` |
-| `SUBDIR` (or `-d`) | `src/kobo_send/cli.py` | `Technical` |
+| `SENT` | `src/kobo_send/cli.py` | `Sent` |
+| `SUBDIR` (or `-d`) | `src/kobo_send/cli.py` | empty: `Books/` itself |
 | `LABEL` | `src/kobo_send/cli.py` | `KOBOeReader` |
 | `PDF_MODE` (or `--pdf`) | `src/kobo_send/cli.py` | `fit` |
 | `K2PDFOPT_DEVICE` | `src/kobo_send/books.py` | `koc` (Kobo Clara HD profile: same 1072 px, 300 dpi panel as the Clara BW) |

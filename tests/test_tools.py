@@ -1,7 +1,9 @@
 """The rclone and lsblk call shapes, with subprocess replaced by a fake."""
 
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from kobo_send import device, inbox
@@ -27,6 +29,20 @@ class InboxTest(unittest.TestCase):
             run.call_args.args[0],
             ["rclone", "moveto", "gdrive:Books/a b.pdf", "gdrive:Books/Sent/a b.pdf"],
         )
+
+    def test_local_folder_needs_no_rclone(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("subprocess.run") as run:
+            folder = Path(tmp)
+            (folder / "b.pdf").write_bytes(b"%PDF")
+            (folder / "a.epub").write_bytes(b"epub")
+            (folder / "Sent").mkdir()
+            self.assertEqual(inbox.list_files(tmp), ["a.epub", "b.pdf"])  # Sent/ is not a file
+            inbox.fetch(tmp, "a.epub", folder / "copy.epub")
+            inbox.archive(tmp, "a.epub", "Sent")
+            self.assertEqual((folder / "copy.epub").read_bytes(), b"epub")
+            self.assertEqual((folder / "Sent" / "a.epub").read_bytes(), b"epub")
+            self.assertFalse((folder / "a.epub").exists())
+        run.assert_not_called()
 
     @mock.patch("subprocess.run")
     def test_rclone_failure_is_reported(self, run):

@@ -43,9 +43,9 @@ class SendTest(unittest.TestCase):
 
     def test_inbox_book_is_archived_after_success(self):
         fetch = lambda inbox, name, dest: shutil.copyfile(self.book, dest)  # noqa: E731
-        with mock.patch.object(cli.inbox, "fetch", side_effect=fetch), mock.patch.object(
-            cli.inbox, "archive"
-        ) as archive:
+        with mock.patch.object(cli, "INBOX", "gdrive:Books"), mock.patch.object(
+            cli.inbox, "fetch", side_effect=fetch
+        ), mock.patch.object(cli.inbox, "archive") as archive:
             ok, out = self.send(cli.Job(books.plan("a.kepub.epub"), None))
         self.assertTrue(ok, out)
         archive.assert_called_once_with("gdrive:Books", "a.kepub.epub", "Sent")
@@ -65,10 +65,16 @@ class SendTest(unittest.TestCase):
 
 class GatherTest(unittest.TestCase):
     def test_inbox_ignores_other_files(self):
-        with mock.patch.object(cli.inbox, "list_files", return_value=["a.pdf", "notes.txt", "b.epub"]):
+        with mock.patch.object(cli, "INBOX", "gdrive:Books"), mock.patch.object(
+            cli.inbox, "list_files", return_value=["a.pdf", "notes.txt", "b.epub"]
+        ):
             jobs, ok = cli._gather([], "fit")
         self.assertTrue(ok)
         self.assertEqual([j.plan.source_name for j in jobs], ["a.pdf", "b.epub"])
+
+    def test_no_inbox_set_stops_before_any_work(self):
+        with mock.patch.object(cli, "INBOX", ""), self.assertRaisesRegex(cli.Fatal, "KOBO_SEND_INBOX"):
+            cli._gather([], "fit")
 
     def test_missing_command_line_file_is_skipped_and_reported(self):
         err = io.StringIO()

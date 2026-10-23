@@ -13,9 +13,11 @@ from pathlib import Path
 
 from . import books, device, inbox
 
-INBOX = "gdrive:Books"  # rclone remote folder to send from
+# A local folder or an rclone remote folder, for example gdrive:Books. There is no default,
+# because a guessed folder could be a whole library, and a run moves every book in it to Sent/.
+INBOX = os.environ.get("KOBO_SEND_INBOX", "")
 SENT = "Sent"  # subfolder of the inbox that receives sent files
-SUBDIR = "Technical"  # default folder under Books/ on the Kobo
+SUBDIR = ""  # default folder under Books/ on the Kobo. Empty means Books/ itself.
 LABEL = "KOBOeReader"  # filesystem label of the Kobo
 PDF_MODE = "fit"  # default PDF mode: "fit" (k2pdfopt) or "reflow" (marker, see the README)
 
@@ -56,11 +58,12 @@ def _parser() -> argparse.ArgumentParser:
         "files",
         nargs="*",
         type=Path,
-        help=f"books to send. With none, send every EPUB and PDF in {INBOX} and move each sent file to {SENT}/",
+        help=f"books to send. With none, send every EPUB and PDF in the inbox (KOBO_SEND_INBOX) "
+        f"and move each sent file to {SENT}/",
     )
     p.add_argument(
         "-d", "--subdir", default=SUBDIR,
-        help="folder under Books/ on the Kobo (default: %(default)s)",
+        help=f"folder under Books/ on the Kobo (default: {SUBDIR or 'Books/ itself'})",
     )
     p.add_argument(
         "-k", "--keep", action="store_true",
@@ -109,6 +112,8 @@ def _run(args: argparse.Namespace) -> int:
 def _gather(files: list[Path], pdf_mode: str) -> tuple[list[Job], bool]:
     """Return the jobs to run, and False if a command-line file had to be skipped."""
     if not files:
+        if not INBOX:
+            raise Fatal("no inbox. Set KOBO_SEND_INBOX to a folder or an rclone remote, or name the books to send.")
         plans = (books.plan(name, pdf_mode) for name in inbox.list_files(INBOX))
         return [Job(p, None) for p in plans if p], True
     jobs, ok = [], True
