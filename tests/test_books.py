@@ -31,7 +31,7 @@ class PlanTest(unittest.TestCase):
 
     def test_clean_name(self):
         raw = (
-            "example.pub_the-practice-of-system-and-network-administration-volume-1-3rd-edition"
+            "the-practice-of-system-and-network-administration-volume-1-3rd-edition"
             "-9780321919168-0321919165-9780321943187-9780133415087-0133415082"
         )
         self.assertEqual(

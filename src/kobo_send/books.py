@@ -21,8 +21,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 # Longest suffix first, so "x.kepub.epub" does not match as ".epub".
 SUFFIXES = (".kepub.epub", ".epub", ".pdf")
 
-# Download sites put their name in front and every ISBN of the book at the end.
-_SITE_PREFIX = re.compile(r"^example\.pub_")
+# Some downloads end with every ISBN of the book.
 _ISBN_TAIL = re.compile(r"(-\d{13}|-\d{9}[\dX])+$")
 
 K2PDFOPT_ARGS = (
@@ -66,7 +65,7 @@ def plan(source_name: str, pdf_mode: str = "fit") -> Plan | None:
 
 
 def clean_name(stem: str) -> str:
-    return _ISBN_TAIL.sub("", _SITE_PREFIX.sub("", stem))
+    return _ISBN_TAIL.sub("", stem)
 
 
 def convert(src: Path, out: Path, pdf_mode: str) -> None:
