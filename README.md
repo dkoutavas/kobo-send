@@ -128,10 +128,6 @@ Other approaches that were tested and rejected:
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
-## WSL version
-
-`wsl/kobo-send` is the first version. It is a Bash script for a Windows laptop with WSL2 and Google Drive for Desktop. It is kept for reference and is not maintained.
-
 ## License
 
 GPL-3.0-or-later. Reflow mode imports marker, which is GPL-3.0. The marker model weights have their own license. marker downloads them on first use.
