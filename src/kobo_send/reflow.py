@@ -291,45 +291,79 @@ def split_depth(outline: list[tuple[int, str, int]]) -> int:
     return depth
 
 
+def _key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def place_bookmarks(parts: list[Part], titles: list[str]) -> list[int | None]:
+    """For each bookmark title, the index of the heading part it names on its page, or None.
+
+    Exact matches first, then a bookmark that ends with the heading text
+    ("Chapter 1: Introducing Kubernetes" names the heading "1 Introducing Kubernetes").
+    """
+    found: list[int | None] = [None] * len(titles)
+    used: set[int] = set()
+    for exact in (True, False):
+        for t, title in enumerate(titles):
+            if found[t] is not None:
+                continue
+            want = _key(title)
+            for j, part in enumerate(parts):
+                have = _key(part.title)
+                if j in used or not part.level or not have:
+                    continue
+                if want == have or (not exact and (want.endswith(have) or have.endswith(want))):
+                    found[t] = j
+                    used.add(j)
+                    break
+    return found
+
+
 def build(
     pages: list[tuple[int, list[Part]]], outline: list[tuple[int, str, int]], book_title: str
 ) -> tuple[list[epub.Chapter], list[epub.TocEntry] | None]:
     """Split the pages into chapters at the PDF bookmarks, and turn every bookmark into a TOC entry.
 
-    Each page starts with an anchor, so a bookmark inside a chapter links to its page.
-    Without bookmarks, fall back to the headings and a flat table of contents.
+    Each bookmark gets its own anchor (t0, t1, ...), at the heading it names, or else at the top
+    of its page. Shared targets are the suspected reason why a Kobo showed no table of contents
+    for a book with page anchors. Without bookmarks, fall back to the headings and a flat table
+    of contents.
     """
     if not outline:
         return chapters([part for _, parts in pages for part in parts], book_title), None
     depth = split_depth(outline)
     starts: dict[int, str] = {}
-    for level, title, page in outline:
+    on_page: dict[int, list[int]] = {}
+    for k, (level, title, page) in enumerate(outline):
+        on_page.setdefault(page, []).append(k)
         if level <= depth:
             starts.setdefault(page, title)
     out: list[epub.Chapter] = []
     body: list[str] = []
     title = book_title
-    first_page: list[int] = []
-    chapter_of: dict[int, int] = {}
+    chapter_of: dict[int, int] = {}  # bookmark index -> chapter index
     for number, parts in pages:
         if number in starts and body:
             out.append(epub.Chapter(title, "\n".join(body)))
             body = []
-        if not body:  # the first page of a chapter
-            first_page.append(number)
+        if not body:
             title = starts.get(number, title)
-        chapter_of[number] = len(out)
-        body.append(f'<span id="p{number}"></span>')
-        body += [p.html for p in parts]
+        marks = on_page.get(number, [])
+        where = place_bookmarks(parts, [outline[k][1] for k in marks])
+        at_top = "".join(f'<span id="t{k}"></span>' for k, j in zip(marks, where) if j is None)
+        body.append(at_top or "<span></span>")  # a page always adds something, so a chapter is never empty
+        for j, part in enumerate(parts):
+            anchors = "".join(f'<span id="t{k}"></span>' for k, w in zip(marks, where) if w == j)
+            body.append(anchors + part.html)
+        for k in marks:
+            chapter_of[k] = len(out)
     if body:
         out.append(epub.Chapter(title, "\n".join(body)))
-    toc = []
-    for level, entry_title, page in outline:
-        if page not in chapter_of:
-            continue
-        i = chapter_of[page]
-        anchor = "" if first_page[i] == page else f"#p{page}"
-        toc.append(epub.TocEntry(level, entry_title, f"text/{epub.chapter_name(i)}{anchor}"))
+    toc = [
+        epub.TocEntry(level, entry, f"text/{epub.chapter_name(chapter_of[k])}#t{k}")
+        for k, (level, entry, _) in enumerate(outline)
+        if k in chapter_of
+    ]
     return out, toc
 
 

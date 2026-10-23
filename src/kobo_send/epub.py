@@ -11,14 +11,16 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
+# No <a>: the link areas of a PDF overlap the body text, so marker puts links on unrelated words.
+# A link is of little use on an e-reader, so the cleaner keeps the text and drops the link.
 KEEP_TAGS = {
     "p", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "code", "b", "strong", "i", "em", "u",
-    "sub", "sup", "a", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
+    "sub", "sup", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
     "blockquote", "img", "br", "hr", "span", "div", "figure", "figcaption",
 }
 VOID_TAGS = {"br", "hr", "img"}
-KEEP_ATTRS = {"href", "src", "alt", "colspan", "rowspan", "class", "id"}
-PAGE_ANCHOR = re.compile(r"p\d+")  # the only ids kept: page anchors that the table of contents links to
+KEEP_ATTRS = {"src", "alt", "colspan", "rowspan", "class", "id"}
+TOC_ANCHOR = re.compile(r"t\d+")  # the only ids kept: the anchors that the table of contents links to
 # Characters that XML 1.0 does not allow. PDF text layers contain some of them.
 _BAD_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
 
@@ -75,10 +77,7 @@ class _Cleaner(HTMLParser):
         kept = []
         for name, value in attrs:
             value = value or ""
-            # marker writes in-page anchors that do not exist in the EPUB. Keep web links only.
-            if name not in KEEP_ATTRS or (name == "href" and not value.startswith(("http://", "https://"))):
-                continue
-            if name == "id" and not PAGE_ANCHOR.fullmatch(value):
+            if name not in KEEP_ATTRS or (name == "id" and not TOC_ANCHOR.fullmatch(value)):
                 continue
             kept.append(f' {name}="{esc(value)}"')
         if tag in VOID_TAGS:

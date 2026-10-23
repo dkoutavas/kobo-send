@@ -192,23 +192,40 @@ class ChapterTest(unittest.TestCase):
         self.assertEqual(reflow.split_depth(outline), 1)
         self.assertEqual(reflow.split_depth([(0, "Ch", 0)] * 24 + [(1, "Sec", 0)] * 141), 0)
 
-    def test_bookmarks_split_chapters_and_link_to_pages(self):
+    def test_bookmarks_split_chapters_with_one_target_each(self):
         pages = [(n, [reflow.Part(f"<p>page {n}</p>")]) for n in range(6)]
-        outline = [(0, "Front", 0), (0, "1 Intro", 2), (1, "1.1 Why", 3), (0, "2 Pods", 4)]
+        pages[2] = (2, [
+            reflow.Part("<h1>1 Intro</h1>", 1, "1 Intro"),
+            reflow.Part("<p>text</p>"),
+            reflow.Part("<h2>1.1 Why</h2>", 2, "1.1 Why"),
+        ])
+        # "Chapter 1: Intro" and "1.1 Why" start on the same page: each must get its own target.
+        outline = [(0, "Front", 0), (0, "Chapter 1: Intro", 2), (1, "1.1 Why", 2), (0, "2 Pods", 4)]
         # Three top-level bookmarks fit the limit, four with the section do not: split at level 0.
         with mock.patch.object(reflow, "MAX_CHAPTERS", 3):
             chapters, toc = reflow.build(pages, outline, "Book")
-        self.assertEqual([c.title for c in chapters], ["Front", "1 Intro", "2 Pods"])
-        self.assertIn('<span id="p3"></span>', chapters[1].body)
+        self.assertEqual([c.title for c in chapters], ["Front", "Chapter 1: Intro", "2 Pods"])
+        self.assertIn('<span id="t1"></span><h1>1 Intro</h1>', chapters[1].body)
+        self.assertIn('<span id="t2"></span><h2>1.1 Why</h2>', chapters[1].body)
         self.assertEqual(
             [(e.level, e.title, e.href) for e in toc],
             [
-                (0, "Front", "text/ch0001.xhtml"),
-                (0, "1 Intro", "text/ch0002.xhtml"),
-                (1, "1.1 Why", "text/ch0002.xhtml#p3"),
-                (0, "2 Pods", "text/ch0003.xhtml"),
+                (0, "Front", "text/ch0001.xhtml#t0"),
+                (0, "Chapter 1: Intro", "text/ch0002.xhtml#t1"),
+                (1, "1.1 Why", "text/ch0002.xhtml#t2"),
+                (0, "2 Pods", "text/ch0003.xhtml#t3"),
             ],
         )
+        self.assertEqual(len({e.href for e in toc}), len(toc))
+
+    def test_bookmark_finds_its_heading_exact_match_first(self):
+        parts = [
+            reflow.Part("<h1>1 Introducing Kubernetes</h1>", 1, "1 Introducing Kubernetes"),
+            reflow.Part("<h2>1.1 Introducing Kubernetes</h2>", 2, "1.1 Introducing Kubernetes"),
+            reflow.Part("<p>x</p>"),
+        ]
+        titles = ["1.1 Introducing Kubernetes", "Chapter 1: Introducing Kubernetes", "Not here"]
+        self.assertEqual(reflow.place_bookmarks(parts, titles), [1, 0, None])
 
 
 if __name__ == "__main__":

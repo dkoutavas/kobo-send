@@ -13,12 +13,12 @@ class CleanerTest(unittest.TestCase):
         out = epub.to_xhtml('<p block-type="Text">a<br>b &amp; <weird>c</weird><b>d</p>')
         self.assertEqual(out, "<p>a<br/>b &amp; c<b>d</b></p>")
 
-    def test_keeps_web_links_only(self):
-        out = epub.to_xhtml('<a href="#page-3">x</a> <a href="https://k8s.io">y</a>')
-        self.assertEqual(out, '<a>x</a> <a href="https://k8s.io">y</a>')
+    def test_drops_links_and_keeps_their_text(self):
+        out = epub.to_xhtml('<p><a href="#page-3">x</a> <a href="https://k8s.io">y</a></p>')
+        self.assertEqual(out, "<p>x y</p>")
 
-    def test_keeps_page_anchor_ids_only(self):
-        self.assertEqual(epub.to_xhtml('<span id="p170"></span><p id="x">a</p>'), '<span id="p170"></span><p>a</p>')
+    def test_keeps_toc_anchor_ids_only(self):
+        self.assertEqual(epub.to_xhtml('<span id="t17"></span><p id="x">a</p>'), '<span id="t17"></span><p>a</p>')
 
     def test_drops_characters_xml_forbids(self):
         self.assertEqual(epub.to_xhtml("<p>a\x0cb\x00</p>"), "<p>ab</p>")
