@@ -76,4 +76,4 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 ## License
 
-GPL-3.0-or-later. Reflow mode runs marker (Apache-2.0) as a separate program. The marker model weights have their own license (a modified OpenRAIL-M, free for personal use), and marker downloads them on first use.
+MIT. Reflow mode runs marker (Apache-2.0) as a separate program. The marker model weights have their own license (a modified OpenRAIL-M, free for personal use), and marker downloads them on first use.
