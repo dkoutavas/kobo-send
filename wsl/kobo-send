@@ -76,7 +76,14 @@ mnt=$(mount_drive "$letter") || die "cannot mount $letter:. sudo needs a termina
 [[ -d $mnt/.kobo ]] || die "$mnt has no .kobo directory, so it is not a Kobo root"
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+keepalive=
+trap '[[ -n $keepalive ]] && kill "$keepalive" 2>/dev/null; rm -rf "$work"' EXIT
+if ((eject)); then
+  # A long batch outlives the sudo timestamp, and the final umount needs sudo. Ask now, keep it fresh.
+  sudo -v
+  while sleep 60; do sudo -n true 2>/dev/null || exit; done &
+  keepalive=$!
+fi
 mkdir -p "$work/in" "$work/out"
 dest=$mnt/Books/$subdir
 mkdir -p "$dest"
@@ -131,7 +138,7 @@ if ((fail)); then
   echo "kobo-send: errors above, leaving $mnt mounted" >&2
 elif ((eject)); then
   cd /
-  sudo umount "$mnt"
+  sudo umount "$mnt" || die "unmount failed. Run: sudo umount $mnt, then eject $letter: in Explorer"
   powershell.exe -NoProfile -Command \
     "(New-Object -ComObject Shell.Application).Namespace(17).ParseName('$letter:').InvokeVerb('Eject')"
   echo "ejected $letter:. Unplug once it is gone from Explorer."
