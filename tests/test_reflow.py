@@ -9,6 +9,8 @@ from kobo_send import reflow
 CHAR = 4.8  # Courier glyph advance at 8 pt
 MONO = {"name": "Courier", "flags": 1}
 SERIF = {"name": "NewBaskerville-Roman", "flags": 0}
+TYPE3 = {"name": "", "flags": 0}  # what pdfium reports for a Type 3 font
+PROSE_ADVANCES = (2.2, 4.9, 3.1, 5.6, 2.7, 4.1, 3.6)
 
 
 def line(text, x, y, font=MONO, height=7.0):
@@ -19,6 +21,16 @@ def line(text, x, y, font=MONO, height=7.0):
     ]
     span = {"text": text, "font": font, "chars": chars}
     return {"bbox": [x, y, x + len(text) * CHAR, y + height], "spans": [span]}
+
+
+def prose_line(text, x, y, height=7.0):
+    """A line in a proportional font: the glyph advances differ."""
+    chars, pos = [], x
+    for i, ch in enumerate(text):
+        w = PROSE_ADVANCES[i % len(PROSE_ADVANCES)]
+        chars.append({"char": ch, "bbox": [pos, y, pos + w, y + height]})
+        pos += w
+    return {"bbox": [x, y, pos, y + height], "spans": [{"text": text, "font": SERIF, "chars": chars}]}
 
 
 def pdftext_page(*lines):
@@ -56,8 +68,29 @@ class CodeTest(unittest.TestCase):
         self.assertEqual(len(reflow.code_runs(lines)), 2)
 
     def test_prose_lines_are_not_code(self):
-        lines = reflow.page_lines(pdftext_page(line("Some prose.", 100, 100, SERIF)))
+        lines = reflow.page_lines(pdftext_page(prose_line("Some prose that wraps.", 100, 100)))
         self.assertEqual(reflow.code_runs(lines), [])
+
+    def test_type3_code_font_is_found_by_glyph_positions(self):
+        lines = reflow.page_lines(pdftext_page(
+            prose_line("The following listing shows it.", 100, 91),
+            line("kind: Cluster", 100, 100, TYPE3),
+            line("spec:", 100, 109, TYPE3),  # too short to judge alone: it sits on the grid of its neighbours
+            line("  role: worker", 100, 118, TYPE3),
+            line("}", 100, 127, TYPE3),
+        ))
+        self.assertEqual([l["mono"] for l in lines], [False, True, True, True, True])
+        self.assertEqual(
+            reflow.render_run(reflow.code_runs(lines)[0]),
+            "<pre><code>kind: Cluster\nspec:\n  role: worker\n}</code></pre>",
+        )
+
+    def test_short_prose_line_off_the_grid_stays_prose(self):
+        lines = reflow.page_lines(pdftext_page(
+            line("kind: Cluster", 100, 100, TYPE3),
+            prose_line("ok", 102.3, 109),
+        ))
+        self.assertEqual([l["mono"] for l in lines], [True, False])
 
 
 def block(bid, btype, bbox, html=""):
@@ -66,8 +99,8 @@ def block(bid, btype, bbox, html=""):
 
 class PageTest(unittest.TestCase):
     def setUp(self):
-        prose = line("To create the service, apply this manifest.", 100, 60, SERIF)
-        note = line("This creates a load balancer.", 300, 100, SERIF)
+        prose = prose_line("To create the service, apply this manifest.", 100, 60)
+        note = prose_line("This creates a load balancer.", 300, 100)
         self.lines = reflow.page_lines(pdftext_page(prose, *yaml_lines(), note))
         self.page = {
             "id": "/page/7/Page/0",
@@ -107,8 +140,8 @@ class PageTest(unittest.TestCase):
 
     def test_paragraph_with_one_code_line_stays_prose(self):
         lines = reflow.page_lines(pdftext_page(
-            line("Run the command below to list the pods", 100, 100, SERIF),
-            line("of every namespace in the cluster, then", 100, 109, SERIF),
+            prose_line("Run the command below to list the pods", 100, 100),
+            prose_line("of every namespace in the cluster, then", 100, 109),
             line("kubectl get pods", 100, 118),
         ))
         page = {"id": "/page/1/Page/0", "block_type": "Page", "children": [

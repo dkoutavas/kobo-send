@@ -34,6 +34,10 @@ from . import epub
 
 FIXED_PITCH = 1  # PDF font descriptor flag, bit 1
 MONO_NAME = re.compile(r"courier|mono|consol|menlo|inconsolata|lettergothic|typewriter", re.I)
+# Type 3 fonts have no name and no flags in pdfium, so a line is also judged by its glyph positions.
+MIN_STEPS = 5  # glyph steps that a line needs to be judged by its geometry alone
+STEP_FIT = 0.9  # share of the steps that must be whole multiples of the glyph width
+STEP_TOLERANCE = 0.08  # how far a step can be from a whole multiple, as a share of the width
 SKIP_BLOCKS = {"PageHeader", "PageFooter"}
 REF = re.compile(r"<content-ref src=['\"]([^'\"]+)['\"]></content-ref>")
 HEADING = re.compile(r"^\s*<h([1-6])\b")
@@ -76,6 +80,26 @@ def is_mono(span: dict) -> bool:
     return bool((font.get("flags") or 0) & FIXED_PITCH) or bool(MONO_NAME.search(font.get("name") or ""))
 
 
+def glyph_steps(chars: list[dict]) -> list[float]:
+    xs = [c["bbox"][0] for c in chars]
+    return [b - a for a, b in zip(xs, xs[1:]) if b - a > 0.05]
+
+
+def on_grid(distance: float, width: float, allow_zero: bool = False) -> bool:
+    k = distance / width
+    return (allow_zero or round(k) >= 1) and abs(k - round(k)) < STEP_TOLERANCE
+
+
+def fixed_width(chars: list[dict]) -> float | None:
+    """The glyph width if the glyph positions show a fixed-pitch font, else None."""
+    steps = glyph_steps(chars)
+    if len(steps) < MIN_STEPS:
+        return None
+    # Most neighbouring glyphs are one column apart, so the smaller steps give the width.
+    width = statistics.median(sorted(steps)[: max(3, len(steps) // 2)])
+    return width if sum(on_grid(s, width) for s in steps) >= STEP_FIT * len(steps) else None
+
+
 def page_lines(page: dict) -> list[dict]:
     """Return the text lines of one pdftext page. Only fixed-pitch lines keep their glyphs."""
     lines = []
@@ -84,10 +108,36 @@ def page_lines(page: dict) -> list[dict]:
             text = "".join(s["text"] for s in line["spans"]).strip()
             if not text:
                 continue
-            mono = all(is_mono(s) for s in line["spans"] if s["text"].strip())
-            chars = [c for s in line["spans"] for c in s["chars"] if not c["char"].isspace()] if mono else []
-            lines.append({"bbox": line["bbox"], "text": text, "mono": mono, "chars": chars})
+            chars = [c for s in line["spans"] for c in s["chars"] if not c["char"].isspace()]
+            width = fixed_width(chars)
+            mono = width is not None or all(is_mono(s) for s in line["spans"] if s["text"].strip())
+            lines.append({"bbox": line["bbox"], "text": text, "mono": mono, "chars": chars, "width": width})
+    adopt_short_lines(lines)
+    for line in lines:
+        if not line["mono"]:
+            line["chars"] = []  # only listings need the glyphs
     return lines
+
+
+def adopt_short_lines(lines: list[dict]) -> None:
+    """A line too short to judge joins a listing if its glyphs sit on the grid of a code line next to it."""
+    for _ in range(3):  # a few passes, so that a run of short lines (closing braces) joins too
+        changed = False
+        for line in lines:
+            steps = glyph_steps(line["chars"])
+            if line["mono"] or not line["chars"] or len(steps) >= MIN_STEPS:
+                continue
+            height = line["bbox"][3] - line["bbox"][1]
+            for other in lines:
+                width = other["width"] if other["mono"] else None
+                if not width or other is line or abs(other["bbox"][1] - line["bbox"][1]) > 2.5 * height:
+                    continue
+                offset = line["chars"][0]["bbox"][0] - other["chars"][0]["bbox"][0]
+                if on_grid(offset, width, allow_zero=True) and all(on_grid(s, width) for s in steps):
+                    line["mono"], line["width"], changed = True, width, True
+                    break
+        if not changed:
+            return
 
 
 def code_runs(lines: list[dict]) -> list[dict]:
