@@ -98,21 +98,41 @@ def fixed_width(chars: list[dict]) -> float | None:
 
 def page_lines(page: dict) -> list[dict]:
     """Return the text lines of one pdftext page. Only fixed-pitch lines keep their glyphs."""
-    lines = []
+    found = []
     for block in page["blocks"]:
         for line in block["lines"]:
             text = "".join(s["text"] for s in line["spans"]).strip()
             if not text:
                 continue
             chars = [c for s in line["spans"] for c in s["chars"] if not c["char"].isspace()]
-            width = fixed_width(chars)
-            mono = width is not None or all(is_mono(s) for s in line["spans"] if s["text"].strip())
-            lines.append({"bbox": line["bbox"], "text": text, "mono": mono, "chars": chars, "width": width})
+            spans = [s for s in line["spans"] if s["text"].strip()]
+            found.append((line["bbox"], text, chars, spans, fixed_width(chars)))
+    false_mono = false_mono_fonts(found)
+    lines = []
+    for bbox, text, chars, spans, width in found:
+        flagged = all(is_mono(s) and s["font"].get("name") not in false_mono for s in spans)
+        lines.append({"bbox": bbox, "text": text, "mono": width is not None or flagged, "chars": chars, "width": width})
     adopt_short_lines(lines)
     for line in lines:
         if not line["mono"]:
             line["chars"] = []  # only listings need the glyphs
     return lines
+
+
+def false_mono_fonts(found: list[tuple]) -> set[str]:
+    """Fonts that set the FixedPitch flag, but whose long lines on this page are not fixed pitch.
+
+    Apache FOP sets the flag on proportional fonts (Gotham in the Bitwig manual). Only lines
+    long enough for fixed_width and set only in flagged fonts vote, so inline code in prose
+    does not count against a real code font.
+    """
+    votes: dict[str, list[bool]] = {}
+    for _, _, chars, spans, width in found:
+        if len(glyph_steps(chars)) < MIN_STEPS or not all(is_mono(s) for s in spans):
+            continue
+        for s in spans:
+            votes.setdefault(s["font"].get("name"), []).append(width is not None)
+    return {name for name, fits in votes.items() if 2 * sum(fits) < len(fits)}
 
 
 def adopt_short_lines(lines: list[dict]) -> None:

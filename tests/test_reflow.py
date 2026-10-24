@@ -23,14 +23,14 @@ def line(text, x, y, font=MONO, height=7.0):
     return {"bbox": [x, y, x + len(text) * CHAR, y + height], "spans": [span]}
 
 
-def prose_line(text, x, y, height=7.0):
+def prose_line(text, x, y, height=7.0, font=SERIF):
     """A line in a proportional font: the glyph advances differ."""
     chars, pos = [], x
     for i, ch in enumerate(text):
         w = PROSE_ADVANCES[i % len(PROSE_ADVANCES)]
         chars.append({"char": ch, "bbox": [pos, y, pos + w, y + height]})
         pos += w
-    return {"bbox": [x, y, pos, y + height], "spans": [{"text": text, "font": SERIF, "chars": chars}]}
+    return {"bbox": [x, y, pos, y + height], "spans": [{"text": text, "font": font, "chars": chars}]}
 
 
 def pdftext_page(*lines):
@@ -79,6 +79,19 @@ class CodeTest(unittest.TestCase):
     def test_prose_lines_are_not_code(self):
         lines = reflow.page_lines(pdftext_page(prose_line("Some prose that wraps.", 100, 100)))
         self.assertEqual(reflow.code_runs(lines), [])
+
+    def test_proportional_font_with_a_false_fixed_pitch_flag_is_prose(self):
+        gotham = {"name": "GothamBW-Light", "flags": 1}  # Apache FOP sets the flag on proportional fonts
+        page = pdftext_page(
+            prose_line("When inserting a new instrument layer", 100.0, 100.0, font=gotham),
+            prose_line("the browser shows only instruments", 100.0, 109.0, font=gotham),
+            prose_line("Note", 100.0, 118.0, font=gotham),  # too short to measure, still prose
+        )
+        self.assertEqual([l["mono"] for l in reflow.page_lines(page)], [False, False, False])
+
+    def test_flagged_code_font_keeps_its_short_lines(self):
+        page = pdftext_page(line("kubectl get pods", 100.0, 100.0), line("ls", 300.0, 400.0))
+        self.assertEqual([l["mono"] for l in reflow.page_lines(page)], [True, True])
 
     def test_type3_code_font_is_found_by_glyph_positions(self):
         lines = reflow.page_lines(pdftext_page(
