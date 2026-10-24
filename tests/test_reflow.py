@@ -176,6 +176,17 @@ class PageTest(unittest.TestCase):
         self.assertEqual(parts[0].html, '<img src="../images/img0001.jpg" alt=""/>')
         self.assertEqual(images, {"img0001.jpg": b"\xff\xd8data"})
 
+    def test_marker_block_of_one_line_fragment_stays_in_the_listing(self):
+        # marker made a block of only the "- " of a YAML list item (MEAP). The whole line covers it.
+        lines = reflow.page_lines(pdftext_page(line("ports:", 100, 100), line("- name: http", 100, 109)))
+        page = {"id": "/page/1/Page/0", "block_type": "Page", "children": [
+            block("/page/1/Text/0", "Text", [99, 99, 160, 107], "<p>ports:</p>"),
+            block("/page/1/Text/1", "Text", [99, 108, 106, 117], "<p>-</p>"),
+            block("/page/1/Text/2", "Text", [109, 108, 160, 117], "<p>name: http</p>"),
+        ]}
+        parts = reflow.page_parts(page, lines, {})
+        self.assertEqual([p.html for p in parts], ["<pre><code>ports:\n- name: http</code></pre>"])
+
     def test_paragraph_with_one_code_line_stays_prose(self):
         lines = reflow.page_lines(pdftext_page(
             prose_line("Run the command below to list the pods", 100, 100),

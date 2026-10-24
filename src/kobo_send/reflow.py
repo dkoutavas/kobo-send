@@ -9,10 +9,10 @@ paragraphs, headings, tables, figures and captions. It labels each line of a
 code listing as a separate Text block, so the indentation and the column
 alignment are lost. The PDF still has them: code is set in a fixed-pitch font,
 and each glyph has an exact x position. This module finds the runs of
-fixed-pitch lines with pdftext, rebuilds each run as <pre> from the glyph
+fixed-pitch lines in the glyphs that lite.py reads with pypdfium2, rebuilds each run as <pre> from the glyph
 columns, and keeps the marker HTML for every other block.
 
-The functions that transform the data do not import marker or pdftext, so the
+The functions that transform the data do not import marker or pypdfium2, so the
 unit tests run in the standard kobo-send environment.
 """
 
@@ -30,7 +30,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import epub
+from . import epub, lite
 
 FIXED_PITCH = 1  # PDF font descriptor flag, bit 1
 # Type 3 fonts have no name and no flags in pdfium, so a line is also judged by its glyph positions.
@@ -45,7 +45,6 @@ TAGS = re.compile(r"<[^>]+>")
 CHAPTER_LEVEL = 1  # without PDF bookmarks, a heading at this level or higher starts a new chapter
 MAX_CHAPTERS = 100  # with PDF bookmarks, split at the deepest level that gives at most this many chapters
 CAPTION_GAP = 20.0  # points between a listing caption and the code below it
-PDFTEXT_BATCH = 50  # pages for each pdftext call, to limit memory with keep_chars
 MIN_CHARS_PER_PAGE = 50  # below this, the PDF has no usable text layer
 
 
@@ -97,7 +96,7 @@ def fixed_width(chars: list[dict]) -> float | None:
 
 
 def page_lines(page: dict) -> list[dict]:
-    """Return the text lines of one pdftext page. Only fixed-pitch lines keep their glyphs."""
+    """Return the text lines of one page (pdftext layout). Only fixed-pitch lines keep their glyphs."""
     found = []
     for block in page["blocks"]:
         for line in block["lines"]:
@@ -202,6 +201,18 @@ def centre_in(bbox: list[float], box: list[float]) -> bool:
     return box[0] - 1 <= cx <= box[2] + 1 and box[1] - 1 <= cy <= box[3] + 1
 
 
+def belongs_to(bbox: list[float], box: list[float]) -> bool:
+    """A line belongs to a marker block if its centre is in the block, or if it covers half the block.
+
+    marker can make a block of one fragment of a line, for example the "-" of a YAML list item.
+    The whole line's centre is outside that small block, but the line covers it.
+    """
+    w = min(bbox[2], box[2]) - max(bbox[0], box[0])
+    h = min(bbox[3], box[3]) - max(bbox[1], box[1])
+    covered = w > 0 and h > 0 and w * h >= 0.5 * (box[2] - box[0]) * (box[3] - box[1])
+    return centre_in(bbox, box) or covered
+
+
 def caption_targets(blocks: list[dict], runs: list[dict]) -> dict[str, int]:
     """Map each Caption block id to the code run that starts right below it.
 
@@ -263,7 +274,7 @@ def page_parts(mpage: dict, lines: list[dict], images: dict[str, bytes]) -> list
         if block["block_type"] in SKIP_BLOCKS or block["id"] in captions:
             continue
         inside = [] if (block.get("images") or {}).get(block["id"]) else [
-            l for l in lines if centre_in(l["bbox"], block["bbox"])
+            l for l in lines if belongs_to(l["bbox"], block["bbox"])
         ]
         mono = [l for l in inside if l["mono"]]
         # A paragraph can have a wrapped line that is all code. Only a mostly fixed-pitch block is a listing.
@@ -396,7 +407,7 @@ def chapters(parts: list[Part], book_title: str) -> list[epub.Chapter]:
     return out
 
 
-# ---- marker, pdftext and pypdfium2 (marker environment only) -----------------
+# ---- marker and pypdfium2 (marker environment only) --------------------------
 
 
 def run_marker(pdf: Path, workdir: Path) -> dict:
@@ -419,13 +430,19 @@ def run_marker(pdf: Path, workdir: Path) -> dict:
 
 
 def pdf_lines(pdf: Path, pages: list[int]) -> dict[int, list[dict]]:
-    from pdftext.extraction import dictionary_output
+    # lite reads the glyphs, not pdftext: pdftext puts the YAML list dash of a Type 3 code font
+    # on its own line (163 broken lines in the MEAP).
+    import pypdfium2
 
+    doc = pypdfium2.PdfDocument(str(pdf))
     out: dict[int, list[dict]] = {}
-    for start in range(0, len(pages), PDFTEXT_BATCH):
-        batch = pages[start : start + PDFTEXT_BATCH]
-        for number, page in zip(batch, dictionary_output(str(pdf), page_range=batch, keep_chars=True)):
-            out[number] = page_lines(page)
+    try:
+        for number in pages:
+            page = doc[number]
+            out[number] = page_lines(lite.lines_from_glyphs(lite.pdf_glyphs(page)))
+            page.close()
+    finally:
+        doc.close()
     return out
 
 
