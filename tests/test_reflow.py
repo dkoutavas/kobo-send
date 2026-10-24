@@ -1,7 +1,10 @@
 """The reflow transforms on small synthetic pages. marker and pdftext are not needed."""
 
 import base64
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from kobo_send import reflow
@@ -240,6 +243,21 @@ class ChapterTest(unittest.TestCase):
         titles = ["1.1 Introducing Kubernetes", "Chapter 1: Introducing Kubernetes", "Not here"]
         self.assertEqual(reflow.place_bookmarks(parts, titles), [1, 0, None])
 
+
+
+class MarkerErrorTest(unittest.TestCase):
+    def test_failure_keeps_an_early_warning(self):
+        # The real cause on 2026-10-24: a CUDA warning first, then a long traceback that ends in an HTTP 500.
+        log = ["UserWarning: CUDA initialization: CUDA unknown error"] + [f"  frame {i}" for i in range(40)]
+        log.append("httpx.HTTPStatusError: Server error '500 Internal Server Error'")
+        failed = subprocess.CompletedProcess([], 1, stdout="", stderr="\n".join(log))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("subprocess.run", return_value=failed):
+            with self.assertRaises(reflow.ReflowError) as raised:
+                reflow.run_marker(Path(tmp) / "source.pdf", Path(tmp))
+        message = str(raised.exception)
+        self.assertIn("CUDA unknown error", message)
+        self.assertIn("500 Internal Server Error", message)
+        self.assertLessEqual(len(message.splitlines()), 18)  # books._run shows the last 20 lines
 
 if __name__ == "__main__":
     unittest.main()

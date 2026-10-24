@@ -410,8 +410,11 @@ def run_marker(pdf: Path, workdir: Path) -> dict:
     result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     out = workdir / "out" / "book" / "book.json"
     if result.returncode != 0 or not out.is_file():
-        tail = "\n".join((result.stdout + result.stderr).splitlines()[-15:])
-        raise ReflowError(f"marker_single failed (exit {result.returncode})\n{tail}")
+        lines = (result.stdout + result.stderr).splitlines()
+        # The cause can sit far above the traceback, for example "CUDA initialization: CUDA unknown error".
+        early = [line for line in lines[:-12] if "Warning" in line or "Error" in line][-3:]
+        shown = early + ["..."] * bool(early) + lines[-12:]
+        raise ReflowError(f"marker_single failed (exit {result.returncode})\n" + "\n".join(shown))
     return json.loads(out.read_text(encoding="utf-8"))
 
 
