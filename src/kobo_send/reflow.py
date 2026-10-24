@@ -260,7 +260,9 @@ def page_parts(mpage: dict, lines: list[dict], images: dict[str, bytes]) -> list
     """Turn one marker page into parts, with the code listings rebuilt from the glyphs."""
     by_id: dict[str, dict] = {}
     index(mpage, by_id)
-    blocks = mpage.get("children") or []
+    # marker puts some figures and listings after all the text of their page (MEAP figure 1.12).
+    # ponytail: top-to-bottom order is right for one column. Two-column pages need a column split.
+    blocks = sorted(mpage.get("children") or [], key=lambda b: b["bbox"][1])
     runs = code_runs(lines)
     run_of = {id(l): i for i, run in enumerate(runs) for l in run["lines"]}
     captions = caption_targets(blocks, runs)

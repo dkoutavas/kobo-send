@@ -176,6 +176,22 @@ class PageTest(unittest.TestCase):
         self.assertEqual(parts[0].html, '<img src="../images/img0001.jpg" alt=""/>')
         self.assertEqual(images, {"img0001.jpg": b"\xff\xd8data"})
 
+    def test_blocks_follow_the_page_from_top_to_bottom(self):
+        # marker put the diagram of MEAP figure 1.12 after all the text of its page.
+        pic = block("/page/17/Diagram/1", "Diagram", [84, 39, 438, 219])
+        pic["images"] = {pic["id"]: base64.b64encode(b"\xff\xd8data").decode()}
+        page = {"id": "/page/17/Page/0", "block_type": "Page", "children": [
+            block("/page/17/Caption/2", "Caption", [72, 220, 291, 232], "<p>Figure 1.12 The Control Plane</p>"),
+            block("/page/17/Text/3", "Text", [72, 241, 256, 254], "<p>These are the components:</p>"),
+            pic,
+        ]}
+        parts = reflow.page_parts(page, [], {})
+        self.assertEqual([p.html for p in parts], [
+            '<img src="../images/img0001.jpg" alt=""/>',
+            "<p>Figure 1.12 The Control Plane</p>",
+            "<p>These are the components:</p>",
+        ])
+
     def test_marker_block_of_one_line_fragment_stays_in_the_listing(self):
         # marker made a block of only the "- " of a YAML list item (MEAP). The whole line covers it.
         lines = reflow.page_lines(pdftext_page(line("ports:", 100, 100), line("- name: http", 100, 109)))
